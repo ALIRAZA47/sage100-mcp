@@ -17,6 +17,7 @@ from tests.paths import REPO
 EVALS = runpy.run_path(str(REPO / "scripts" / "run_evals.py"), run_name="run_evals")
 main: Callable[[list[str]], int] = EVALS["main"]
 normal: Callable[[str, str], str | None] = EVALS["normal"]
+split_command: Callable[..., list[str]] = EVALS["split_command"]
 final_answer: Callable[[str], str | None] = EVALS["final_answer"]
 mcp_config: Callable[..., dict[str, Any]] = EVALS["mcp_config"]
 
@@ -157,3 +158,18 @@ def test_a_stdio_server_gets_only_the_variables_it_reads(monkeypatch: pytest.Mon
     env = mcp_config(None, None, ["sage100-mcp", "stdio"])["mcpServers"]["sage100"]["env"]
     assert {name: env[name] for name in wanted} == wanted
     assert not set(unwanted) & set(env)
+
+
+@pytest.mark.parametrize(
+    ("text", "windows", "words"),
+    [
+        ('"C:\\Program Files\\Python312\\python.exe" "C:\\work\\claude stub.py" -p', True,
+         ["C:\\Program Files\\Python312\\python.exe", "C:\\work\\claude stub.py", "-p"]),
+        ("claude --verbose", True, ["claude", "--verbose"]),
+        ("python3 '/tmp/claude stub.py'", False, ["python3", "/tmp/claude stub.py"]),
+        ('npx "@anthropic-ai/claude-code"', False, ["npx", "@anthropic-ai/claude-code"]),
+    ],
+)  # fmt: skip
+def test_the_claude_command_splits_as_its_shell_would(text: str, windows: bool, words: list[str]) -> None:
+    """Windows keeps backslashes, and the quotes around a path are not part of it."""
+    assert split_command(text, windows=windows) == words
