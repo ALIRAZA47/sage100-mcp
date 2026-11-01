@@ -113,11 +113,21 @@ def test_the_service_log_redacts_secrets(tmp_path: Path) -> None:
     try:
         logging.getLogger("sage100_mcp.test_service").error("connecting with DRIVER={x};PWD=hunter2")
     finally:
-        logging.getLogger().removeHandler(handler)
-        handler.close()
+        service.stop_file_logging(handler)
     text = (tmp_path / "logs" / service.LOG_FILE).read_text(encoding="utf-8")
     assert "PWD=***" in text
     assert "hunter2" not in text
+
+
+def test_the_service_lets_go_of_its_log_when_it_stops(tmp_path: Path) -> None:
+    """Windows can't delete or rotate a file another process holds open, and the service's process can
+    outlive its stop by a moment. So the log is closed before the service reports that it stopped."""
+    handler = service.file_logging(tmp_path, "info")
+    logging.getLogger("sage100_mcp.test_service").info("serving")
+    service.stop_file_logging(handler)
+    assert handler not in logging.getLogger().handlers
+    assert getattr(handler, "stream", "open") is None
+    (tmp_path / "logs" / service.LOG_FILE).unlink()  # on Windows this fails while the file is open
 
 
 def test_off_windows_the_command_points_to_serve(

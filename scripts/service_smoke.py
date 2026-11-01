@@ -4,7 +4,8 @@
 
 It installs the service as LocalSystem with a temporary home and a config that serves no company,
 creates a token, waits for sage_status to answer over HTTP, and removes the service again whatever
-happened. Exit status 0 means the service ran and answered.
+happened. Then the stopped service's log file must be free to delete: Windows refuses to delete a file
+that another process holds open. Exit status 0 means the service ran, answered and let go of its log.
 """
 
 from __future__ import annotations
@@ -39,11 +40,43 @@ async def status(token: str) -> str:
     return str(result.structured_content["server"]["version"])
 
 
+def exercise(config: Path, token: str, env: dict[str, str]) -> int:
+    """Install and start the service, then wait for sage_status over HTTP: 0 when it answered."""
+    if cli("service", "install", "--account", "LocalSystem", "--config", str(config), env=env).returncode:
+        return 1
+    if cli("service", "start", env=env).returncode:
+        return 1
+    deadline = time.monotonic() + 60
+    while True:
+        try:
+            version = anyio.run(status, token)
+            print(f"the service answered sage_status: version {version}")
+            return 0
+        except Exception as exc:
+            if time.monotonic() > deadline:
+                print(f"no answer within 60 s: {type(exc).__name__}: {exc}")
+                return 1
+            time.sleep(2)
+
+
+def released(path: Path, seconds: float = 15.0) -> bool:
+    """Whether the stopped service let go of ``path``, within ``seconds``."""
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            path.unlink(missing_ok=True)
+            return True
+        except PermissionError:  # still open in another process
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(0.5)
+
+
 def main() -> int:
     if sys.platform != "win32":
         print("service_smoke.py needs Windows", file=sys.stderr)
         return 2
-    with tempfile.TemporaryDirectory(prefix="sage100-service-") as directory:
+    with tempfile.TemporaryDirectory(prefix="sage100-service-", ignore_cleanup_errors=True) as directory:
         home = Path(directory) / "home"
         config = Path(directory) / "config.yaml"
         config.write_text(f"http:\n  bind: 127.0.0.1:{PORT}\n", encoding="utf-8")
@@ -53,26 +86,16 @@ def main() -> int:
         if created.returncode or not token:
             return 1
         try:
-            if cli("service", "install", "--account", "LocalSystem", "--config", str(config), env=env).returncode:
-                return 1
-            if cli("service", "start", env=env).returncode:
-                return 1
-            deadline = time.monotonic() + 60
-            while True:
-                try:
-                    version = anyio.run(status, token.group(0))
-                    print(f"the service answered sage_status: version {version}")
-                    return 0
-                except Exception as exc:
-                    if time.monotonic() > deadline:
-                        print(f"no answer within 60 s: {type(exc).__name__}: {exc}")
-                        return 1
-                    time.sleep(2)
+            outcome = exercise(config, token.group(0), env)
         finally:
             cli("service", "remove", env=env)
-            log = home / "logs" / "sage100-mcp.log"
-            if log.is_file():
-                print(f"--- {log}\n{log.read_text(encoding='utf-8')[-4000:]}")
+        log = home / "logs" / "sage100-mcp.log"
+        if log.is_file():
+            print(f"--- {log}\n{log.read_text(encoding='utf-8')[-4000:]}")
+            if not released(log):
+                print("the stopped service still held its log file after 15 s")
+                outcome = 1
+        return outcome
 
 
 if __name__ == "__main__":
