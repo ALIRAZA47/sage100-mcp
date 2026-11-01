@@ -3,7 +3,7 @@
 A process loads only ODBC drivers of its own bitness, and the server's own dependencies no longer ship
 32-bit builds (D3). So where Sage's driver is installed only as 32-bit, the 64-bit server starts this
 helper under a 32-bit Python. It sends the helper the DB-API calls it would otherwise make on pyodbc:
-connect, cursor, execute, fetch, the catalog functions, getinfo, cancel and close. The helper makes those
+connect, the timeout, cursor, execute, fetch, the catalog functions, getinfo, cancel and close. The helper makes those
 calls and sends back what the driver returned. It never writes or changes SQL. It runs only the
 statements the server's guard and planner sent, on connections the server opened.
 
@@ -39,7 +39,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from typing import IO, Any
 
-PROTOCOL = 1
+PROTOCOL = 2  # 2: the timeout is set by its own request, when the server assigns it
 MAX_MESSAGE = 64 * 2**20  # bytes; the server fetches in batches far smaller than this
 CLOSED = "[sage100-mcp][32-bit helper]Attempt to use a closed connection or cursor"
 _LENGTH = struct.Struct(">I")
@@ -332,8 +332,10 @@ class _Connection:
             return self._connect(message)
         if op == "getinfo":
             return self.connection.getinfo(message["code"])
+        if op == "timeout":  # pyodbc sets SQL_ATTR_CONNECTION_TIMEOUT now, and the query timeout per new cursor
+            self.connection.timeout = int(message["seconds"])
+            return None
         if op == "cursor":
-            self.connection.timeout = int(message.get("timeout") or 0)  # pyodbc sets it on each new cursor
             return {"cursor": self.helper.keep(self, self.connection.cursor())}
         if op == "close":
             for cursor in self.helper.forget(self):

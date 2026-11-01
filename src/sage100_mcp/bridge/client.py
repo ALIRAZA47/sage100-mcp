@@ -322,14 +322,26 @@ def row_type(names: tuple[str, ...]) -> type[Row]:
 
 
 class Connection:
-    """A connection the helper holds open. Its timeout applies, as in pyodbc, to each new cursor."""
+    """A connection the helper holds open."""
 
     def __init__(self, session: Session, handle: int, autocommit: bool) -> None:
         self._session = session
         self._handle = handle
         self.autocommit = autocommit
-        self.timeout = 0
+        self._timeout = 0
         self._closed = False
+
+    @property
+    def timeout(self) -> int:
+        """The query timeout each new cursor gets, as in pyodbc."""
+        return self._timeout
+
+    @timeout.setter
+    def timeout(self, seconds: int) -> None:
+        """Set in the helper at once. pyodbc sets SQL_ATTR_CONNECTION_TIMEOUT on assignment, so a driver that
+        refuses that attribute refuses it here, as it would in this process."""
+        self._session.call("timeout", connection=self._handle, seconds=int(seconds))
+        self._timeout = int(seconds)
 
     @property
     def closed(self) -> bool:
@@ -337,7 +349,7 @@ class Connection:
         return self._closed or not self._session.alive
 
     def cursor(self) -> Cursor:
-        reply = self._session.call("cursor", connection=self._handle, timeout=int(self.timeout or 0))
+        reply = self._session.call("cursor", connection=self._handle)
         return Cursor(self, self._session, int(reply["cursor"]))
 
     def getinfo(self, code: int) -> Any:

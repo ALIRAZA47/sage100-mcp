@@ -710,7 +710,7 @@ class _ProbeSession:
     def rows(
         self, sql: str, params: Sequence[Any] = (), *, limit: int = 1
     ) -> tuple[list[tuple[Any, ...]], Sequence[Any]]:
-        self.connection.timeout = 0
+        self._clear_timeout()
         cursor = self.connection.cursor()
 
         def work() -> tuple[list[tuple[Any, ...]], Sequence[Any]]:
@@ -753,13 +753,24 @@ class _ProbeSession:
             with suppress(Exception):
                 connection.close()
 
+    def _clear_timeout(self) -> None:
+        """The probe's statements run under its own deadline, not the driver's query timeout.
+
+        Only a timeout that was set is cleared: pyodbc sets SQL_ATTR_CONNECTION_TIMEOUT whenever
+        connection.timeout is assigned, even to 0, and some drivers refuse that attribute (HYC00).
+        """
+        if self.connection.timeout:
+            self.connection.timeout = 0
+
     def timeout_accepted(self, seconds: float) -> None:
-        self.connection.timeout = int(seconds)
+        """Whether the driver takes a query timeout: on assignment (the connection attribute) and on the next cursor."""
         try:
+            self.connection.timeout = int(seconds)
             cursor = self.connection.cursor()
         except self.executor.odbc.Error as exc:
             raise ProbeFailure(trim(str(exc.args[1] if len(exc.args) > 1 else exc))) from None
         finally:
-            self.connection.timeout = 0
+            with suppress(self.executor.odbc.Error):
+                self._clear_timeout()
         with suppress(Exception):
             cursor.close()
