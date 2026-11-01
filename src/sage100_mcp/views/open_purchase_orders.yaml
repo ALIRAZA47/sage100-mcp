@@ -1,0 +1,132 @@
+# Open purchase orders (SPEC.md §12.4).
+#
+# PO_PurchaseOrderHeader keeps completed orders (OrderStatus X). Open ones are N (new), O (open),
+# B (back order) and C (being changed: an open PO with a change order in progress). R is left out: on
+# MAS_EMP its lines are all fully received and some are not yet invoiced, so there is nothing left to
+# receive (docs/decisions.md D39).
+name: open_purchase_orders
+version: 1
+title: Open purchase orders
+modules: [PO]
+description: >-
+  Open purchase order lines (or orders) with quantity still to receive and its value, for new, open,
+  back-ordered and changing POs.
+params:
+  vendor: {type: vendor, description: "Vendor number, or division-vendor such as 01-AIRWAY"}
+  item: {type: code, description: Item code}
+  warehouse: {type: code, max_length: 3, description: Warehouse code}
+  required_before: {type: date, description: Only lines required on or before this date}
+  lines: {type: bool, default: true, description: One row per line; false gives one row per PO}
+pulls:
+  - name: orders
+    table: PO_PurchaseOrderHeader
+    columns: [PurchaseOrderNo, PurchaseOrderDate, OrderType, OrderStatus, APDivisionNo, VendorNo, PurchaseName,
+              RequiredExpireDate]
+    where:
+      - {sql: "APDivisionNo = :vendor_division", if: vendor_division}
+      - {sql: "VendorNo = :vendor_no", if: vendor_no}
+      - "OrderStatus IN ('N', 'O', 'B', 'C')"
+  - name: lines
+    table: PO_PurchaseOrderDetail
+    columns: [PurchaseOrderNo, LineKey, ItemCode, ItemCodeDesc, ItemType, WarehouseCode, RequiredDate, QuantityOrdered,
+              QuantityReceived, QuantityBackordered, QuantityInvoiced, UnitCost, SalesOrderNo]
+    keys_from: {pull: orders, column: PurchaseOrderNo, filter: PurchaseOrderNo}
+    where:
+      - {sql: "ItemCode = :item", if: item}
+      - {sql: "WarehouseCode = :warehouse", if: warehouse}
+variant_param: lines
+variants:
+  "true":
+    totals: [open_value]
+    columns:
+      - {name: PurchaseOrderNo, type: varchar(7), semantic: code}
+      - {name: PurchaseOrderDate, type: date, semantic: date}
+      - {name: OrderStatus, type: varchar(1), semantic: code}
+      - {name: APDivisionNo, type: varchar(2), semantic: code}
+      - {name: VendorNo, type: varchar(7), semantic: code}
+      - {name: PurchaseName, type: varchar(50), semantic: text, description: The vendor name on the PO}
+      - {name: LineKey, type: varchar(6), semantic: code}
+      - {name: ItemCode, type: varchar(30), semantic: code}
+      - {name: ItemCodeDesc, type: varchar(30), semantic: text}
+      - {name: WarehouseCode, type: varchar(3), semantic: code}
+      - {name: RequiredDate, type: date, semantic: date}
+      - {name: QuantityOrdered, type: "decimal(15,6)", semantic: quantity}
+      - {name: QuantityReceived, type: "decimal(15,6)", semantic: quantity}
+      - {name: QuantityBackordered, type: "decimal(15,6)", semantic: quantity}
+      - {name: QuantityInvoiced, type: "decimal(15,6)", semantic: quantity}
+      - {name: open_qty, type: "decimal(15,6)", semantic: quantity, description: Ordered less received}
+      - {name: UnitCost, type: "decimal(15,6)", semantic: money}
+      - {name: open_value, type: "decimal(17,2)", semantic: money, description: Open quantity times unit cost}
+      - {name: SalesOrderNo, type: varchar(7), semantic: code, description: The sales order a drop-ship line serves}
+    local: |
+      SELECT o.PurchaseOrderNo, o.PurchaseOrderDate, o.OrderStatus, o.APDivisionNo, o.VendorNo, o.PurchaseName,
+        l.LineKey, l.ItemCode, l.ItemCodeDesc, l.WarehouseCode, l.RequiredDate, l.QuantityOrdered, l.QuantityReceived,
+        l.QuantityBackordered, l.QuantityInvoiced, l.QuantityOrdered - l.QuantityReceived AS open_qty, l.UnitCost,
+        ROUND((l.QuantityOrdered - l.QuantityReceived) * l.UnitCost, 2) AS open_value, l.SalesOrderNo
+      FROM orders o
+      JOIN lines l ON l.PurchaseOrderNo = o.PurchaseOrderNo
+      WHERE l.QuantityOrdered - l.QuantityReceived > 0
+        AND l.RequiredDate <= :required_before  -- if required_before
+      ORDER BY o.PurchaseOrderNo, l.LineKey
+    tsql: |
+      SELECT o.PurchaseOrderNo, NULLIF(o.PurchaseOrderDate, '1753-01-01') AS PurchaseOrderDate,
+        ISNULL(o.OrderStatus, '') AS OrderStatus, o.APDivisionNo, o.VendorNo, ISNULL(o.PurchaseName, '') AS PurchaseName,
+        l.LineKey, ISNULL(l.ItemCode, '') AS ItemCode, ISNULL(l.ItemCodeDesc, '') AS ItemCodeDesc,
+        ISNULL(l.WarehouseCode, '') AS WarehouseCode, NULLIF(l.RequiredDate, '1753-01-01') AS RequiredDate,
+        ISNULL(l.QuantityOrdered, 0) AS QuantityOrdered, ISNULL(l.QuantityReceived, 0) AS QuantityReceived,
+        ISNULL(l.QuantityBackordered, 0) AS QuantityBackordered, ISNULL(l.QuantityInvoiced, 0) AS QuantityInvoiced,
+        ISNULL(l.QuantityOrdered, 0) - ISNULL(l.QuantityReceived, 0) AS open_qty, ISNULL(l.UnitCost, 0) AS UnitCost,
+        ROUND((ISNULL(l.QuantityOrdered, 0) - ISNULL(l.QuantityReceived, 0)) * ISNULL(l.UnitCost, 0), 2) AS open_value,
+        ISNULL(l.SalesOrderNo, '') AS SalesOrderNo
+      FROM PO_PurchaseOrderHeader o
+      JOIN PO_PurchaseOrderDetail l ON l.PurchaseOrderNo = o.PurchaseOrderNo
+      WHERE o.OrderStatus IN ('N', 'O', 'B', 'C')
+        AND ISNULL(l.QuantityOrdered, 0) - ISNULL(l.QuantityReceived, 0) > 0
+        AND o.APDivisionNo = :vendor_division  -- if vendor_division
+        AND o.VendorNo = :vendor_no  -- if vendor_no
+        AND l.ItemCode = :item  -- if item
+        AND l.WarehouseCode = :warehouse  -- if warehouse
+        AND NULLIF(l.RequiredDate, '1753-01-01') <= :required_before  -- if required_before
+      ORDER BY o.PurchaseOrderNo, l.LineKey
+  "false":
+    totals: [open_value]
+    columns:
+      - {name: PurchaseOrderNo, type: varchar(7), semantic: code}
+      - {name: PurchaseOrderDate, type: date, semantic: date}
+      - {name: OrderStatus, type: varchar(1), semantic: code}
+      - {name: APDivisionNo, type: varchar(2), semantic: code}
+      - {name: VendorNo, type: varchar(7), semantic: code}
+      - {name: PurchaseName, type: varchar(50), semantic: text}
+      - {name: RequiredExpireDate, type: date, semantic: date}
+      - {name: open_lines, type: int, semantic: number}
+      - {name: open_value, type: "decimal(17,2)", semantic: money}
+    local: |
+      SELECT o.PurchaseOrderNo, o.PurchaseOrderDate, o.OrderStatus, o.APDivisionNo, o.VendorNo, o.PurchaseName,
+        o.RequiredExpireDate, COUNT(*) AS open_lines,
+        SUM(ROUND((l.QuantityOrdered - l.QuantityReceived) * l.UnitCost, 2)) AS open_value
+      FROM orders o
+      JOIN lines l ON l.PurchaseOrderNo = o.PurchaseOrderNo
+      WHERE l.QuantityOrdered - l.QuantityReceived > 0
+        AND l.RequiredDate <= :required_before  -- if required_before
+      GROUP BY o.PurchaseOrderNo, o.PurchaseOrderDate, o.OrderStatus, o.APDivisionNo, o.VendorNo, o.PurchaseName,
+        o.RequiredExpireDate
+      ORDER BY o.PurchaseOrderNo
+    tsql: |
+      SELECT o.PurchaseOrderNo, NULLIF(o.PurchaseOrderDate, '1753-01-01') AS PurchaseOrderDate,
+        ISNULL(o.OrderStatus, '') AS OrderStatus, o.APDivisionNo, o.VendorNo, ISNULL(o.PurchaseName, '') AS PurchaseName,
+        NULLIF(o.RequiredExpireDate, '1753-01-01') AS RequiredExpireDate, COUNT(*) AS open_lines,
+        SUM(ROUND((ISNULL(l.QuantityOrdered, 0) - ISNULL(l.QuantityReceived, 0)) * ISNULL(l.UnitCost, 0), 2)) AS open_value
+      FROM PO_PurchaseOrderHeader o
+      JOIN PO_PurchaseOrderDetail l ON l.PurchaseOrderNo = o.PurchaseOrderNo
+      WHERE o.OrderStatus IN ('N', 'O', 'B', 'C')
+        AND ISNULL(l.QuantityOrdered, 0) - ISNULL(l.QuantityReceived, 0) > 0
+        AND o.APDivisionNo = :vendor_division  -- if vendor_division
+        AND o.VendorNo = :vendor_no  -- if vendor_no
+        AND l.ItemCode = :item  -- if item
+        AND l.WarehouseCode = :warehouse  -- if warehouse
+        AND NULLIF(l.RequiredDate, '1753-01-01') <= :required_before  -- if required_before
+      GROUP BY o.PurchaseOrderNo, o.PurchaseOrderDate, o.OrderStatus, o.APDivisionNo, o.VendorNo, o.PurchaseName,
+        o.RequiredExpireDate
+      ORDER BY o.PurchaseOrderNo
+notes:
+  - Open value is the open quantity times the line's unit cost, rounded to cents per line.

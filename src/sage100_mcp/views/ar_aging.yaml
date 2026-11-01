@@ -1,0 +1,170 @@
+# AR aging (SPEC.md §12.1).
+#
+# Bucket bounds come from AR_Options (views/rules.py): :c1..:c4 are the first day of each past-due
+# category, :basis is due (AgeInvoicesBy D) or invoice (I) unless age_by says otherwise, and the bucket
+# columns are renamed after what they hold (current, days_1_15, ...). {{unit}} is day, or month when
+# AR_Options.AgingCategory is M (calendar months; the days column is then named months). Age is counted
+# from the basis date to as_of, inclusive of each category's first day; an invoice without a due date
+# ages from its invoice date, and one without either goes in the oldest bucket (docs/decisions.md D42).
+# Credit memos and prepayments keep their negative balances in their own bucket. In v1 as_of moves the
+# aging date only: balances are always current.
+name: ar_aging
+version: 1
+title: AR aging
+modules: [AR]
+description: >-
+  Accounts receivable aging as of a date, per customer or per invoice, in the company's own aging
+  categories. Balances are current; as_of sets the aging date only.
+params:
+  as_of: {type: date, default: today, description: The aging date (balances are always current)}
+  customer: {type: customer, description: "Customer number, or division-customer such as 01-ABF"}
+  division: {type: code, max_length: 2, description: AR division}
+  detail: {type: choice, choices: [summary, invoice], default: summary, description: One row per customer or per invoice}
+  age_by: {type: choice, choices: [due, invoice], description: "Age from the due or the invoice date; default AR_Options.AgeInvoicesBy"}
+  min_balance: {type: decimal, default: "0.01", description: Leave out customers whose total is smaller than this}
+pulls:
+  - name: invoices
+    table: AR_OpenInvoice
+    columns: [ARDivisionNo, CustomerNo, InvoiceNo, InvoiceType, InvoiceDate, InvoiceDueDate, Balance]
+    where:
+      - {sql: "ARDivisionNo = :customer_division", if: customer_division}
+      - {sql: "CustomerNo = :customer_no", if: customer_no}
+      - {sql: "ARDivisionNo = :division", if: division}
+      - "Balance <> 0"
+  - name: customers
+    table: AR_Customer
+    columns: [ARDivisionNo, CustomerNo, CustomerName, TelephoneNo]
+    where:
+      - {sql: "ARDivisionNo = :customer_division", if: customer_division}
+      - {sql: "CustomerNo = :customer_no", if: customer_no}
+      - {sql: "ARDivisionNo = :division", if: division}
+variant_param: detail
+variants:
+  summary:
+    totals: [bucket_0, bucket_1, bucket_2, bucket_3, bucket_4, total]
+    columns:
+      - {name: ARDivisionNo, type: varchar(2), semantic: code}
+      - {name: CustomerNo, type: varchar(20), semantic: code}
+      - {name: CustomerName, type: varchar(50), semantic: text}
+      - {name: TelephoneNo, type: varchar(20), semantic: text}
+      - {name: bucket_0, type: "decimal(17,2)", semantic: money, description: Not yet in a past-due category}
+      - {name: bucket_1, type: "decimal(17,2)", semantic: money}
+      - {name: bucket_2, type: "decimal(17,2)", semantic: money}
+      - {name: bucket_3, type: "decimal(17,2)", semantic: money}
+      - {name: bucket_4, type: "decimal(17,2)", semantic: money}
+      - {name: total, type: "decimal(17,2)", semantic: money}
+    local: |
+      WITH aged AS (
+        SELECT i.ARDivisionNo, i.CustomerNo, i.Balance,
+          COALESCE(date_diff({{unit}}, CASE WHEN :basis = 'due' THEN COALESCE(i.InvoiceDueDate, i.InvoiceDate)
+                                         ELSE i.InvoiceDate END, :as_of), 99999) AS days
+        FROM invoices i
+        WHERE i.Balance <> 0
+      ), totals AS (
+        SELECT ARDivisionNo, CustomerNo,
+          SUM(CASE WHEN days < :c1 THEN Balance ELSE 0 END) AS bucket_0,
+          SUM(CASE WHEN days >= :c1 AND days < :c2 THEN Balance ELSE 0 END) AS bucket_1,
+          SUM(CASE WHEN days >= :c2 AND days < :c3 THEN Balance ELSE 0 END) AS bucket_2,
+          SUM(CASE WHEN days >= :c3 AND days < :c4 THEN Balance ELSE 0 END) AS bucket_3,
+          SUM(CASE WHEN days >= :c4 THEN Balance ELSE 0 END) AS bucket_4,
+          SUM(Balance) AS total
+        FROM aged
+        GROUP BY ARDivisionNo, CustomerNo
+      )
+      SELECT t.ARDivisionNo, t.CustomerNo, COALESCE(c.CustomerName, ''), COALESCE(c.TelephoneNo, ''),
+        t.bucket_0, t.bucket_1, t.bucket_2, t.bucket_3, t.bucket_4, t.total
+      FROM totals t
+      LEFT JOIN customers c ON c.ARDivisionNo = t.ARDivisionNo AND c.CustomerNo = t.CustomerNo
+      WHERE ABS(t.total) >= :min_balance
+      ORDER BY t.ARDivisionNo, t.CustomerNo
+    tsql: |
+      WITH aged AS (
+        SELECT o.ARDivisionNo, o.CustomerNo, o.Balance,
+          ISNULL(DATEDIFF({{unit}}, CASE WHEN :basis = 'due'
+                                    THEN COALESCE(NULLIF(o.InvoiceDueDate, '1753-01-01'), NULLIF(o.InvoiceDate, '1753-01-01'))
+                                    ELSE NULLIF(o.InvoiceDate, '1753-01-01') END, :as_of), 99999) AS days
+        FROM AR_OpenInvoice o
+        WHERE o.Balance <> 0
+          AND o.ARDivisionNo = :customer_division  -- if customer_division
+          AND o.CustomerNo = :customer_no  -- if customer_no
+          AND o.ARDivisionNo = :division  -- if division
+      ), totals AS (
+        SELECT ARDivisionNo, CustomerNo,
+          SUM(CASE WHEN days < :c1 THEN Balance ELSE 0 END) AS bucket_0,
+          SUM(CASE WHEN days >= :c1 AND days < :c2 THEN Balance ELSE 0 END) AS bucket_1,
+          SUM(CASE WHEN days >= :c2 AND days < :c3 THEN Balance ELSE 0 END) AS bucket_2,
+          SUM(CASE WHEN days >= :c3 AND days < :c4 THEN Balance ELSE 0 END) AS bucket_3,
+          SUM(CASE WHEN days >= :c4 THEN Balance ELSE 0 END) AS bucket_4,
+          SUM(Balance) AS total
+        FROM aged
+        GROUP BY ARDivisionNo, CustomerNo
+      )
+      SELECT t.ARDivisionNo, t.CustomerNo, ISNULL(c.CustomerName, '') AS CustomerName,
+        ISNULL(c.TelephoneNo, '') AS TelephoneNo, t.bucket_0, t.bucket_1, t.bucket_2, t.bucket_3, t.bucket_4, t.total
+      FROM totals t
+      LEFT JOIN AR_Customer c ON c.ARDivisionNo = t.ARDivisionNo AND c.CustomerNo = t.CustomerNo
+      WHERE ABS(t.total) >= :min_balance
+      ORDER BY t.ARDivisionNo, t.CustomerNo
+  invoice:
+    totals: [Balance]
+    columns:
+      - {name: ARDivisionNo, type: varchar(2), semantic: code}
+      - {name: CustomerNo, type: varchar(20), semantic: code}
+      - {name: CustomerName, type: varchar(50), semantic: text}
+      - {name: InvoiceNo, type: varchar(7), semantic: code}
+      - {name: InvoiceType, type: varchar(2), semantic: code}
+      - {name: InvoiceDate, type: date, semantic: date}
+      - {name: InvoiceDueDate, type: date, semantic: date}
+      - {name: days, type: int, semantic: number, description: "Days (months, if the company ages by month) from the basis date to as_of"}
+      - {name: bucket, type: varchar(20), semantic: code}
+      - {name: Balance, type: "decimal(17,2)", semantic: money}
+    local: |
+      WITH aged AS (
+        SELECT i.ARDivisionNo, i.CustomerNo, i.InvoiceNo, i.InvoiceType, i.InvoiceDate, i.InvoiceDueDate, i.Balance,
+          date_diff({{unit}}, CASE WHEN :basis = 'due' THEN COALESCE(i.InvoiceDueDate, i.InvoiceDate)
+                                ELSE i.InvoiceDate END, :as_of) AS days
+        FROM invoices i
+        WHERE i.Balance <> 0
+      ), totals AS (
+        SELECT ARDivisionNo, CustomerNo, SUM(Balance) AS total FROM aged GROUP BY ARDivisionNo, CustomerNo
+      )
+      SELECT a.ARDivisionNo, a.CustomerNo, COALESCE(c.CustomerName, ''), a.InvoiceNo, a.InvoiceType, a.InvoiceDate,
+        a.InvoiceDueDate, a.days,
+        CASE WHEN COALESCE(a.days, 99999) < :c1 THEN :label_0 WHEN COALESCE(a.days, 99999) < :c2 THEN :label_1
+             WHEN COALESCE(a.days, 99999) < :c3 THEN :label_2 WHEN COALESCE(a.days, 99999) < :c4 THEN :label_3
+             ELSE :label_4 END,
+        a.Balance
+      FROM aged a
+      JOIN totals t ON t.ARDivisionNo = a.ARDivisionNo AND t.CustomerNo = a.CustomerNo
+      LEFT JOIN customers c ON c.ARDivisionNo = a.ARDivisionNo AND c.CustomerNo = a.CustomerNo
+      WHERE ABS(t.total) >= :min_balance
+      ORDER BY a.ARDivisionNo, a.CustomerNo, a.InvoiceNo, a.InvoiceType
+    tsql: |
+      WITH aged AS (
+        SELECT o.ARDivisionNo, o.CustomerNo, o.InvoiceNo, o.InvoiceType,
+          NULLIF(o.InvoiceDate, '1753-01-01') AS InvoiceDate, NULLIF(o.InvoiceDueDate, '1753-01-01') AS InvoiceDueDate,
+          o.Balance,
+          DATEDIFF({{unit}}, CASE WHEN :basis = 'due'
+                             THEN COALESCE(NULLIF(o.InvoiceDueDate, '1753-01-01'), NULLIF(o.InvoiceDate, '1753-01-01'))
+                             ELSE NULLIF(o.InvoiceDate, '1753-01-01') END, :as_of) AS days
+        FROM AR_OpenInvoice o
+        WHERE o.Balance <> 0
+          AND o.ARDivisionNo = :customer_division  -- if customer_division
+          AND o.CustomerNo = :customer_no  -- if customer_no
+          AND o.ARDivisionNo = :division  -- if division
+      ), totals AS (
+        SELECT ARDivisionNo, CustomerNo, SUM(Balance) AS total FROM aged GROUP BY ARDivisionNo, CustomerNo
+      )
+      SELECT a.ARDivisionNo, a.CustomerNo, ISNULL(c.CustomerName, '') AS CustomerName, a.InvoiceNo, a.InvoiceType,
+        a.InvoiceDate, a.InvoiceDueDate, a.days,
+        CASE WHEN ISNULL(a.days, 99999) < :c1 THEN :label_0 WHEN ISNULL(a.days, 99999) < :c2 THEN :label_1
+             WHEN ISNULL(a.days, 99999) < :c3 THEN :label_2 WHEN ISNULL(a.days, 99999) < :c4 THEN :label_3
+             ELSE :label_4 END AS bucket,
+        a.Balance
+      FROM aged a
+      JOIN totals t ON t.ARDivisionNo = a.ARDivisionNo AND t.CustomerNo = a.CustomerNo
+      LEFT JOIN AR_Customer c ON c.ARDivisionNo = a.ARDivisionNo AND c.CustomerNo = a.CustomerNo
+      WHERE ABS(t.total) >= :min_balance
+      ORDER BY a.ARDivisionNo, a.CustomerNo, a.InvoiceNo, a.InvoiceType
+notes:
+  - Reconciles to Sage's AR Aged Invoice Report for the same aging date (tests/reconciliation).

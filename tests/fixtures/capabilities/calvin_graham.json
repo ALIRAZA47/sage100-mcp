@@ -1,0 +1,173 @@
+{
+  "driver_version": "profile:calvin_graham",
+  "features": {
+    "aggregate_exact": true,
+    "arithmetic": true,
+    "between": true,
+    "case": false,
+    "cast": false,
+    "column_alias": true,
+    "comma_join": true,
+    "comments": false,
+    "compound_and": false,
+    "count_distinct": false,
+    "date_literal": true,
+    "derived_table": false,
+    "distinct": true,
+    "exists": false,
+    "group_by": true,
+    "group_by_expression": false,
+    "having": true,
+    "ij": false,
+    "ij_nested": false,
+    "in_list": true,
+    "is_null": true,
+    "iso_date_string": false,
+    "like": true,
+    "limit": true,
+    "limit_offset": true,
+    "negative_literal": false,
+    "oj_inner": true,
+    "oj_left": true,
+    "oj_left_chain": false,
+    "or": false,
+    "order_by_column": false,
+    "order_by_desc": false,
+    "order_by_position": false,
+    "parameters": false,
+    "primary_keys": false,
+    "query_timeout": false,
+    "subquery_in": false,
+    "table_alias": true,
+    "top": false,
+    "union": false,
+    "union_all": false
+  },
+  "format": 1,
+  "functions": {
+    "ABS": {
+      "bare": false,
+      "escaped": false
+    },
+    "CEILING": {
+      "bare": false,
+      "escaped": false
+    },
+    "CONCAT": {
+      "bare": false,
+      "escaped": false
+    },
+    "CURDATE": {
+      "bare": false,
+      "escaped": false
+    },
+    "DAYOFMONTH": {
+      "bare": false,
+      "escaped": false
+    },
+    "DAYOFWEEK": {
+      "bare": false,
+      "escaped": false
+    },
+    "FLOOR": {
+      "bare": false,
+      "escaped": false
+    },
+    "IFNULL": {
+      "bare": false,
+      "escaped": false
+    },
+    "LCASE": {
+      "bare": false,
+      "escaped": false
+    },
+    "LEFT": {
+      "bare": false,
+      "escaped": false
+    },
+    "LENGTH": {
+      "bare": false,
+      "escaped": false
+    },
+    "LOCATE": {
+      "bare": false,
+      "escaped": false
+    },
+    "LTRIM": {
+      "bare": false,
+      "escaped": false
+    },
+    "MOD": {
+      "bare": false,
+      "escaped": false
+    },
+    "MONTH": {
+      "bare": false,
+      "escaped": false
+    },
+    "NOW": {
+      "bare": false,
+      "escaped": false
+    },
+    "QUARTER": {
+      "bare": false,
+      "escaped": false
+    },
+    "REPLACE": {
+      "bare": false,
+      "escaped": false
+    },
+    "RIGHT": {
+      "bare": false,
+      "escaped": false
+    },
+    "ROUND": {
+      "bare": false,
+      "escaped": false
+    },
+    "RTRIM": {
+      "bare": false,
+      "escaped": false
+    },
+    "SUBSTRING": {
+      "bare": false,
+      "escaped": false
+    },
+    "TIMESTAMPADD": {
+      "bare": false,
+      "escaped": false
+    },
+    "TIMESTAMPDIFF": {
+      "bare": false,
+      "escaped": false
+    },
+    "TRUNCATE": {
+      "bare": false,
+      "escaped": false
+    },
+    "UCASE": {
+      "bare": false,
+      "escaped": false
+    },
+    "WEEK": {
+      "bare": false,
+      "escaped": false
+    },
+    "YEAR": {
+      "bare": false,
+      "escaped": false
+    }
+  },
+  "keywords": {
+    "Compression": false,
+    "EnforceNullDate": true,
+    "ReadOnly": false,
+    "SSL": false
+  },
+  "notes": {
+    "source": "SPEC.md 5.2: one production report (Calvin Graham); compound AND treated as failing"
+  },
+  "probed_at": null,
+  "source": "profile",
+  "table": null
+}

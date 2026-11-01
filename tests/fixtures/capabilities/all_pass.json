@@ -1,0 +1,173 @@
+{
+  "driver_version": "profile:all_pass",
+  "features": {
+    "aggregate_exact": true,
+    "arithmetic": true,
+    "between": true,
+    "case": true,
+    "cast": true,
+    "column_alias": true,
+    "comma_join": true,
+    "comments": true,
+    "compound_and": true,
+    "count_distinct": true,
+    "date_literal": true,
+    "derived_table": true,
+    "distinct": true,
+    "exists": true,
+    "group_by": true,
+    "group_by_expression": true,
+    "having": true,
+    "ij": true,
+    "ij_nested": true,
+    "in_list": true,
+    "is_null": true,
+    "iso_date_string": true,
+    "like": true,
+    "limit": true,
+    "limit_offset": true,
+    "negative_literal": true,
+    "oj_inner": true,
+    "oj_left": true,
+    "oj_left_chain": true,
+    "or": true,
+    "order_by_column": true,
+    "order_by_desc": true,
+    "order_by_position": true,
+    "parameters": true,
+    "primary_keys": true,
+    "query_timeout": true,
+    "subquery_in": true,
+    "table_alias": true,
+    "top": true,
+    "union": true,
+    "union_all": true
+  },
+  "format": 1,
+  "functions": {
+    "ABS": {
+      "bare": true,
+      "escaped": true
+    },
+    "CEILING": {
+      "bare": true,
+      "escaped": true
+    },
+    "CONCAT": {
+      "bare": true,
+      "escaped": true
+    },
+    "CURDATE": {
+      "bare": true,
+      "escaped": true
+    },
+    "DAYOFMONTH": {
+      "bare": true,
+      "escaped": true
+    },
+    "DAYOFWEEK": {
+      "bare": true,
+      "escaped": true
+    },
+    "FLOOR": {
+      "bare": true,
+      "escaped": true
+    },
+    "IFNULL": {
+      "bare": true,
+      "escaped": true
+    },
+    "LCASE": {
+      "bare": true,
+      "escaped": true
+    },
+    "LEFT": {
+      "bare": true,
+      "escaped": true
+    },
+    "LENGTH": {
+      "bare": true,
+      "escaped": true
+    },
+    "LOCATE": {
+      "bare": true,
+      "escaped": true
+    },
+    "LTRIM": {
+      "bare": true,
+      "escaped": true
+    },
+    "MOD": {
+      "bare": true,
+      "escaped": true
+    },
+    "MONTH": {
+      "bare": true,
+      "escaped": true
+    },
+    "NOW": {
+      "bare": true,
+      "escaped": true
+    },
+    "QUARTER": {
+      "bare": true,
+      "escaped": true
+    },
+    "REPLACE": {
+      "bare": true,
+      "escaped": true
+    },
+    "RIGHT": {
+      "bare": true,
+      "escaped": true
+    },
+    "ROUND": {
+      "bare": true,
+      "escaped": true
+    },
+    "RTRIM": {
+      "bare": true,
+      "escaped": true
+    },
+    "SUBSTRING": {
+      "bare": true,
+      "escaped": true
+    },
+    "TIMESTAMPADD": {
+      "bare": true,
+      "escaped": true
+    },
+    "TIMESTAMPDIFF": {
+      "bare": true,
+      "escaped": true
+    },
+    "TRUNCATE": {
+      "bare": true,
+      "escaped": true
+    },
+    "UCASE": {
+      "bare": true,
+      "escaped": true
+    },
+    "WEEK": {
+      "bare": true,
+      "escaped": true
+    },
+    "YEAR": {
+      "bare": true,
+      "escaped": true
+    }
+  },
+  "keywords": {
+    "Compression": true,
+    "EnforceNullDate": true,
+    "ReadOnly": true,
+    "SSL": true
+  },
+  "notes": {
+    "source": "test profile: every check passes"
+  },
+  "probed_at": null,
+  "source": "profile",
+  "table": null
+}

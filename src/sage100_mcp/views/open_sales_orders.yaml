@@ -1,0 +1,170 @@
+# Open sales order backlog (SPEC.md §12.3).
+#
+# On an open order line QuantityOrdered stays as ordered and QuantityShipped accumulates as
+# shipments are invoiced; a partly shipped order becomes a back order (OrderType B). Checked on
+# MAS_EMP: partly shipped open lines keep the ordered quantity and carry the shipped amount, and
+# IM_ItemWarehouse's QuantityOnSalesOrder and QuantityOnBackOrder equal the open quantity of the
+# standard and back orders. So open = QuantityOrdered - QuantityShipped. The line's ExtensionAmt is
+# already the open quantity's value at the unit price less any line discount, so it is the open value
+# (docs/decisions.md D38). Charge (ItemType 3), comment (4) and miscellaneous (5) lines are left out
+# unless include_misc is true; charges and comments carry no quantity, so they are kept while the
+# order is open. One row per order adds the header's own totals: on MAS_EMP the header's merchandise
+# is the sum of its lines' ExtensionAmt, and AR_Customer.OpenOrderAmt is the sum of order_total over
+# a customer's S and B orders (D49).
+name: open_sales_orders
+version: 1
+title: Open sales orders
+modules: [SO]
+description: >-
+  Open sales order backlog: lines (or orders) with quantity still to ship and its value. Standard and
+  back orders by default; quotes, master and repeating orders only if asked for.
+params:
+  customer: {type: customer, description: "Customer number, or division-customer such as 01-ABF"}
+  item: {type: code, description: Item code}
+  warehouse: {type: code, max_length: 3, description: Warehouse code}
+  order_types: {type: codes, choices: [S, B, Q, M, R], default: [S, B], description: "Order types: S standard, B back order, Q quote, M master, R repeating"}
+  promise_before: {type: date, description: Only lines promised on or before this date}
+  lines: {type: bool, default: true, description: One row per line; false gives one row per order}
+  include_misc: {type: bool, default: false, description: "Keep charge, comment and miscellaneous lines"}
+pulls:
+  - name: orders
+    table: SO_SalesOrderHeader
+    columns: [SalesOrderNo, OrderDate, OrderType, OrderStatus, ShipExpireDate, ARDivisionNo, CustomerNo, BillToName,
+              CustomerPONo, TaxableAmt, NonTaxableAmt, FreightAmt, SalesTaxAmt, DiscountAmt]
+    where:
+      - {sql: "ARDivisionNo = :customer_division", if: customer_division}
+      - {sql: "CustomerNo = :customer_no", if: customer_no}
+      - "OrderType IN (:order_types)"
+  - name: lines
+    table: SO_SalesOrderDetail
+    columns: [SalesOrderNo, LineKey, ItemCode, ItemType, ItemCodeDesc, WarehouseCode, PromiseDate, QuantityOrdered,
+              QuantityShipped, QuantityBackordered, UnitPrice, ExtensionAmt]
+    keys_from: {pull: orders, column: SalesOrderNo, filter: SalesOrderNo}
+    where:
+      - {sql: "ItemCode = :item", if: item}
+      - {sql: "WarehouseCode = :warehouse", if: warehouse}
+variant_param: lines
+variants:
+  "true":
+    totals: [open_value]
+    columns:
+      - {name: SalesOrderNo, type: varchar(7), semantic: code}
+      - {name: OrderDate, type: date, semantic: date}
+      - {name: OrderType, type: varchar(1), semantic: code}
+      - {name: OrderStatus, type: varchar(1), semantic: code}
+      - {name: ShipExpireDate, type: date, semantic: date}
+      - {name: ARDivisionNo, type: varchar(2), semantic: code}
+      - {name: CustomerNo, type: varchar(20), semantic: code}
+      - {name: BillToName, type: varchar(50), semantic: text}
+      - {name: CustomerPONo, type: varchar(30), semantic: text}
+      - {name: LineKey, type: varchar(6), semantic: code}
+      - {name: ItemCode, type: varchar(30), semantic: code}
+      - {name: ItemCodeDesc, type: varchar(30), semantic: text}
+      - {name: ItemType, type: varchar(1), semantic: code}
+      - {name: WarehouseCode, type: varchar(3), semantic: code}
+      - {name: PromiseDate, type: date, semantic: date}
+      - {name: QuantityOrdered, type: "decimal(15,6)", semantic: quantity}
+      - {name: QuantityShipped, type: "decimal(15,6)", semantic: quantity}
+      - {name: QuantityBackordered, type: "decimal(15,6)", semantic: quantity}
+      - {name: open_qty, type: "decimal(15,6)", semantic: quantity, description: Ordered less shipped}
+      - {name: UnitPrice, type: "decimal(15,6)", semantic: money}
+      - {name: open_value, type: "decimal(17,2)", semantic: money, description: "The line's extension: open quantity at the unit price, less any line discount"}
+    local: |
+      SELECT o.SalesOrderNo, o.OrderDate, o.OrderType, o.OrderStatus, o.ShipExpireDate, o.ARDivisionNo, o.CustomerNo,
+        o.BillToName, o.CustomerPONo, l.LineKey, l.ItemCode, l.ItemCodeDesc, l.ItemType, l.WarehouseCode, l.PromiseDate,
+        l.QuantityOrdered, l.QuantityShipped, l.QuantityBackordered, l.QuantityOrdered - l.QuantityShipped AS open_qty,
+        l.UnitPrice, COALESCE(l.ExtensionAmt, 0) AS open_value
+      FROM orders o
+      JOIN lines l ON l.SalesOrderNo = o.SalesOrderNo
+      WHERE (l.QuantityOrdered - l.QuantityShipped > 0
+          OR l.ItemType IN ('3', '4', '5') AND l.QuantityOrdered = 0  -- if include_misc
+        )
+        AND l.ItemType NOT IN ('3', '4', '5')  -- if not include_misc
+        AND l.PromiseDate <= :promise_before  -- if promise_before
+      ORDER BY o.SalesOrderNo, l.LineKey
+    tsql: |
+      SELECT o.SalesOrderNo, NULLIF(o.OrderDate, '1753-01-01') AS OrderDate, ISNULL(o.OrderType, '') AS OrderType,
+        ISNULL(o.OrderStatus, '') AS OrderStatus, NULLIF(o.ShipExpireDate, '1753-01-01') AS ShipExpireDate,
+        o.ARDivisionNo, o.CustomerNo, ISNULL(o.BillToName, '') AS BillToName, ISNULL(o.CustomerPONo, '') AS CustomerPONo,
+        l.LineKey, ISNULL(l.ItemCode, '') AS ItemCode, ISNULL(l.ItemCodeDesc, '') AS ItemCodeDesc,
+        ISNULL(l.ItemType, '') AS ItemType, ISNULL(l.WarehouseCode, '') AS WarehouseCode,
+        NULLIF(l.PromiseDate, '1753-01-01') AS PromiseDate, ISNULL(l.QuantityOrdered, 0) AS QuantityOrdered,
+        ISNULL(l.QuantityShipped, 0) AS QuantityShipped, ISNULL(l.QuantityBackordered, 0) AS QuantityBackordered,
+        ISNULL(l.QuantityOrdered, 0) - ISNULL(l.QuantityShipped, 0) AS open_qty, ISNULL(l.UnitPrice, 0) AS UnitPrice,
+        ISNULL(l.ExtensionAmt, 0) AS open_value
+      FROM SO_SalesOrderHeader o
+      JOIN SO_SalesOrderDetail l ON l.SalesOrderNo = o.SalesOrderNo
+      WHERE o.OrderType IN (:order_types)
+        AND (ISNULL(l.QuantityOrdered, 0) - ISNULL(l.QuantityShipped, 0) > 0
+          OR ISNULL(l.ItemType, '') IN ('3', '4', '5') AND ISNULL(l.QuantityOrdered, 0) = 0  -- if include_misc
+        )
+        AND o.ARDivisionNo = :customer_division  -- if customer_division
+        AND o.CustomerNo = :customer_no  -- if customer_no
+        AND l.ItemCode = :item  -- if item
+        AND l.WarehouseCode = :warehouse  -- if warehouse
+        AND ISNULL(l.ItemType, '') NOT IN ('3', '4', '5')  -- if not include_misc
+        AND NULLIF(l.PromiseDate, '1753-01-01') <= :promise_before  -- if promise_before
+      ORDER BY o.SalesOrderNo, l.LineKey
+  "false":
+    totals: [open_value, order_total]
+    columns:
+      - {name: SalesOrderNo, type: varchar(7), semantic: code}
+      - {name: OrderDate, type: date, semantic: date}
+      - {name: OrderType, type: varchar(1), semantic: code}
+      - {name: OrderStatus, type: varchar(1), semantic: code}
+      - {name: ShipExpireDate, type: date, semantic: date}
+      - {name: ARDivisionNo, type: varchar(2), semantic: code}
+      - {name: CustomerNo, type: varchar(20), semantic: code}
+      - {name: BillToName, type: varchar(50), semantic: text}
+      - {name: CustomerPONo, type: varchar(30), semantic: text}
+      - {name: open_lines, type: int, semantic: number}
+      - {name: open_value, type: "decimal(17,2)", semantic: money, description: The open value of the lines shown}
+      - {name: merchandise, type: "decimal(17,2)", semantic: money, description: "Every open line, charges included, as the order header keeps it"}
+      - {name: freight, type: "decimal(17,2)", semantic: money}
+      - {name: sales_tax, type: "decimal(17,2)", semantic: money}
+      - {name: discount, type: "decimal(17,2)", semantic: money}
+      - {name: order_total, type: "decimal(17,2)", semantic: money, description: "Merchandise, freight and sales tax, less discount: what AR_Customer.OpenOrderAmt adds up"}
+    local: |
+      SELECT o.SalesOrderNo, o.OrderDate, o.OrderType, o.OrderStatus, o.ShipExpireDate, o.ARDivisionNo, o.CustomerNo,
+        o.BillToName, o.CustomerPONo, COUNT(*) AS open_lines, SUM(COALESCE(l.ExtensionAmt, 0)) AS open_value,
+        MAX(COALESCE(o.TaxableAmt, 0) + COALESCE(o.NonTaxableAmt, 0)) AS merchandise, MAX(COALESCE(o.FreightAmt, 0)) AS freight,
+        MAX(COALESCE(o.SalesTaxAmt, 0)) AS sales_tax, MAX(COALESCE(o.DiscountAmt, 0)) AS discount,
+        MAX(COALESCE(o.TaxableAmt, 0) + COALESCE(o.NonTaxableAmt, 0) + COALESCE(o.FreightAmt, 0) + COALESCE(o.SalesTaxAmt, 0)
+            - COALESCE(o.DiscountAmt, 0)) AS order_total
+      FROM orders o
+      JOIN lines l ON l.SalesOrderNo = o.SalesOrderNo
+      WHERE (l.QuantityOrdered - l.QuantityShipped > 0
+          OR l.ItemType IN ('3', '4', '5') AND l.QuantityOrdered = 0  -- if include_misc
+        )
+        AND l.ItemType NOT IN ('3', '4', '5')  -- if not include_misc
+        AND l.PromiseDate <= :promise_before  -- if promise_before
+      GROUP BY o.SalesOrderNo, o.OrderDate, o.OrderType, o.OrderStatus, o.ShipExpireDate, o.ARDivisionNo,
+        o.CustomerNo, o.BillToName, o.CustomerPONo
+      ORDER BY o.SalesOrderNo
+    tsql: |
+      SELECT o.SalesOrderNo, NULLIF(o.OrderDate, '1753-01-01') AS OrderDate, ISNULL(o.OrderType, '') AS OrderType,
+        ISNULL(o.OrderStatus, '') AS OrderStatus, NULLIF(o.ShipExpireDate, '1753-01-01') AS ShipExpireDate,
+        o.ARDivisionNo, o.CustomerNo, ISNULL(o.BillToName, '') AS BillToName, ISNULL(o.CustomerPONo, '') AS CustomerPONo,
+        COUNT(*) AS open_lines, SUM(ISNULL(l.ExtensionAmt, 0)) AS open_value,
+        MAX(ISNULL(o.TaxableAmt, 0) + ISNULL(o.NonTaxableAmt, 0)) AS merchandise, MAX(ISNULL(o.FreightAmt, 0)) AS freight,
+        MAX(ISNULL(o.SalesTaxAmt, 0)) AS sales_tax, MAX(ISNULL(o.DiscountAmt, 0)) AS discount,
+        MAX(ISNULL(o.TaxableAmt, 0) + ISNULL(o.NonTaxableAmt, 0) + ISNULL(o.FreightAmt, 0) + ISNULL(o.SalesTaxAmt, 0)
+            - ISNULL(o.DiscountAmt, 0)) AS order_total
+      FROM SO_SalesOrderHeader o
+      JOIN SO_SalesOrderDetail l ON l.SalesOrderNo = o.SalesOrderNo
+      WHERE o.OrderType IN (:order_types)
+        AND (ISNULL(l.QuantityOrdered, 0) - ISNULL(l.QuantityShipped, 0) > 0
+          OR ISNULL(l.ItemType, '') IN ('3', '4', '5') AND ISNULL(l.QuantityOrdered, 0) = 0  -- if include_misc
+        )
+        AND o.ARDivisionNo = :customer_division  -- if customer_division
+        AND o.CustomerNo = :customer_no  -- if customer_no
+        AND l.ItemCode = :item  -- if item
+        AND l.WarehouseCode = :warehouse  -- if warehouse
+        AND ISNULL(l.ItemType, '') NOT IN ('3', '4', '5')  -- if not include_misc
+        AND NULLIF(l.PromiseDate, '1753-01-01') <= :promise_before  -- if promise_before
+      GROUP BY o.SalesOrderNo, o.OrderDate, o.OrderType, o.OrderStatus, o.ShipExpireDate, o.ARDivisionNo,
+        o.CustomerNo, o.BillToName, o.CustomerPONo
+      ORDER BY o.SalesOrderNo
+notes:
+  - Charge (ItemType 3), comment (4) and miscellaneous (5) lines are left out unless include_misc is true.
+  - Open value is the line's stored ExtensionAmt, so line discounts are in it.

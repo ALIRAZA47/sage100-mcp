@@ -1,0 +1,68 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.outova/sage100-mcp",
+  "title": "Sage 100 (US), read-only",
+  "description": "Read-only US Sage 100 data: AR, AP, orders, inventory and GL by company. ProvideX on Windows.",
+  "version": "1.0.0-rc.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "sage100-mcp",
+      "version": "1.0.0rc1",
+      "runtimeHint": "uvx",
+      "transport": {"type": "stdio"},
+      "packageArguments": [{"type": "positional", "value": "stdio"}],
+      "environmentVariables": [
+        {
+          "name": "SAGE100_MCP_CONFIG",
+          "description": "Path to config.yaml; by default %ProgramData%\\sage100-mcp\\config.yaml on Windows. `sage100-mcp init` writes it.",
+          "format": "filepath",
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "sage100-mcp",
+      "version": "1.0.0rc1",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://127.0.0.1:8765/mcp",
+        "headers": [
+          {
+            "name": "Authorization",
+            "description": "A bearer token from `sage100-mcp token create`, or an OAuth access token",
+            "value": "Bearer {token}",
+            "isRequired": true,
+            "isSecret": true,
+            "variables": {
+              "token": {"description": "The token", "isRequired": true, "isSecret": true}
+            }
+          }
+        ]
+      },
+      "packageArguments": [{"type": "positional", "value": "serve"}],
+      "environmentVariables": [
+        {
+          "name": "SAGE100_MCP_CONFIG",
+          "description": "Path to config.yaml, whose http section sets the address, TLS and authentication",
+          "format": "filepath",
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "platforms": {
+        "providex": ["windows"],
+        "sqlserver": ["windows", "linux", "macos"]
+      },
+      "readOnly": true,
+      "notes": "Sage 100 Standard and Advanced (ProvideX ODBC) need the Sage driver, a Windows DLL, so that backend runs on Windows only. Premium (SQL Server) runs anywhere with Microsoft ODBC Driver 18. Remote clients reach `serve` over Streamable HTTP with TLS and a token. Not affiliated with or endorsed by Sage."
+    }
+  }
+}

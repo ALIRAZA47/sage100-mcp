@@ -1,0 +1,69 @@
+# sage100-mcp configuration (SPEC.md §16.1). Copy to %ProgramData%\sage100-mcp\config.yaml.
+# Every key can also be set as an environment variable, e.g. SAGE100_MCP__LIMITS__MAX_ROWS=500.
+# Values are read as text and then typed, so codes like 001 need no quotes.
+# Secrets never go in this file: `credential` names a Windows Credential Manager (keyring) entry.
+
+server:
+  name: sage100-mcp
+  log_level: info                 # debug | info | warning | error
+  audit_dir: C:\ProgramData\sage100-mcp\audit
+  audit_redact_literals: true
+
+http:                             # only for `sage100-mcp serve`; docs/remote.md
+  bind: 127.0.0.1:8765
+  allowed_origins: ["https://claude.ai"]
+  auth: bearer                    # bearer | oauth
+  oauth: {issuer: "https://login.example.com", audience: "sage100-mcp"}
+  # Not in SPEC.md §16.1 (docs/decisions.md D51):
+  # public_url: https://sage-mcp.corp.example/mcp    # the URL clients use, behind a TLS proxy
+  # tls_cert: C:\ProgramData\sage100-mcp\tls\server.crt   # or serve TLS directly
+  # tls_key: C:\ProgramData\sage100-mcp\tls\server.key
+
+backends:
+  sage_prod:
+    type: providex                # Sage 100 Standard/Advanced through the ProvideX ODBC driver
+    transport: local              # local | cs (Client/Server ODBC, Advanced only)
+    directory: \\SAGESRV\Sage\Sage 100\MAS90   # UNC path: a Windows service has no mapped drives
+    prefix: auto                  # auto = derived from directory, or copied from SOTAMAS90
+    viewdll: auto
+    cs: {host: SAGESRV, port: 20222}
+    credential: sage100-mcp/sage_prod          # keyring entry holding UID/PWD
+    driver_options: {DirtyReads: 0, BurstMode: 0, CacheSize: 4}   # the only tunable keywords
+    performance_profile: {after_hours: "19:00-06:00"}
+    # Not in SPEC.md §16.1 (docs/decisions.md D67): which build of Sage's driver to load. auto loads the
+    # 64-bit one in the server, or Sage's 32-bit driver through the 32-bit helper where only that is
+    # installed. 32 and 64 force one.
+    driver_bitness: auto          # auto | 32 | 64
+    # helper: C:\Python312-32\python.exe   # only for a pip install: a 32-bit Python with pyodbc runs the helper;
+    #                                      # the MSI installs odbc32\sage100-mcp-odbc32.exe and needs no setting
+  sage_premium:
+    type: sqlserver               # Sage 100 Premium, or a SQL mirror of any edition
+    server: SQLSRV\SAGE
+    database_pattern: MAS_{company}
+    system_database: MAS_SYSTEM
+    driver: ODBC Driver 18 for SQL Server
+    encrypt: true
+    trust_server_certificate: false   # true only for a server with a self-signed certificate
+    connect_timeout_s: 15
+    credential: sage100-mcp/sage_premium      # keyring entry: user name = SQL login, password = its password
+
+companies:
+  default: ABC
+  allow: [ABC, EMP]               # omit = all discovered
+  hide: [DEF]
+  backend_map: {ABC: sage_prod, EMP: sage_premium}
+
+limits:
+  max_rows: 1000
+  max_rows_hard: 50000
+  max_pushdown_rows: 250000
+  query_timeout_s: {providex: 60, sqlserver: 30}
+  per_company_concurrency: {providex: 2, sqlserver: 4}
+  rate_per_min: 30
+
+policy_file: C:\ProgramData\sage100-mcp\policy.yaml
+
+views:
+  # sage (the default) follows the company's IM_Options "Include in Quantity Available" setting, as Sage's
+  # Item Inquiry does. Or name terms joined by + and -: onhand, so, bo, wo_required, in_shipping, po, wo.
+  inventory_available_formula: sage

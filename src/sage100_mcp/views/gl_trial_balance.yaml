@@ -1,0 +1,91 @@
+# GL trial balance for one fiscal period (SPEC.md §12.6).
+#
+# GL_PeriodPostingHistory holds one row per account and period with activity. BeginningBalance is
+# the year-opening balance and is stored on the period 01 row only; later rows hold 0 (checked on
+# MAS_EMP: no row after period 01 has one, and every balance-sheet account's period 01 balance
+# equals the prior year's closing balance). So an account's balance at the end of period p is the
+# sum of BeginningBalance + DebitAmount - CreditAmount over periods 01..p, and a period without a row
+# simply adds nothing (docs/decisions.md D37).
+name: gl_trial_balance
+version: 1
+title: GL trial balance
+modules: [GL]
+description: >-
+  Trial balance for a fiscal year and period: each account's beginning balance, the period's debits
+  and credits, the ending balance and its debit or credit column. Warns when debits and credits differ.
+params:
+  fiscal_year: {type: year, required: true, description: "Fiscal year, such as 2024"}
+  period: {type: period, required: true, description: "Fiscal period, 1 to 13"}
+  include_zero: {type: bool, default: false, description: Include accounts with no balance and no activity}
+pulls:
+  - name: history
+    table: GL_PeriodPostingHistory
+    columns: [AccountKey, FiscalYear, FiscalPeriod, BeginningBalance, DebitAmount, CreditAmount]
+    where:
+      - "FiscalYear = :fiscal_year"
+  - name: accounts
+    table: GL_Account
+    columns: [AccountKey, Account, AccountDesc, AccountType]
+variants:
+  default:
+    totals: [period_debits, period_credits, debit, credit]
+    columns:
+      - {name: Account, type: varchar(41), semantic: code, description: The formatted account number}
+      - {name: AccountDesc, type: varchar(50), semantic: text}
+      - {name: AccountType, type: varchar(2), semantic: code}
+      - {name: beginning_balance, type: "decimal(17,2)", semantic: money, description: Balance at the start of the period}
+      - {name: period_debits, type: "decimal(17,2)", semantic: money}
+      - {name: period_credits, type: "decimal(17,2)", semantic: money}
+      - {name: ending_balance, type: "decimal(17,2)", semantic: money, description: "Debit positive, credit negative"}
+      - {name: debit, type: "decimal(17,2)", semantic: money, description: The ending balance when it is a debit}
+      - {name: credit, type: "decimal(17,2)", semantic: money, description: The ending balance when it is a credit}
+    local: |
+      WITH balances AS (
+        SELECT a.AccountKey, a.Account, a.AccountDesc, a.AccountType,
+          SUM(CASE WHEN h.FiscalPeriod < :period THEN h.BeginningBalance + h.DebitAmount - h.CreditAmount
+                   WHEN h.FiscalPeriod = :period THEN h.BeginningBalance ELSE 0 END) AS beginning_balance,
+          SUM(CASE WHEN h.FiscalPeriod = :period THEN h.DebitAmount ELSE 0 END) AS period_debits,
+          SUM(CASE WHEN h.FiscalPeriod = :period THEN h.CreditAmount ELSE 0 END) AS period_credits,
+          SUM(CASE WHEN h.FiscalPeriod <= :period THEN h.BeginningBalance + h.DebitAmount - h.CreditAmount
+                   ELSE 0 END) AS ending_balance
+        FROM accounts a
+        LEFT JOIN history h ON h.AccountKey = a.AccountKey
+        GROUP BY a.AccountKey, a.Account, a.AccountDesc, a.AccountType
+      )
+      SELECT Account, AccountDesc, AccountType,
+        COALESCE(beginning_balance, 0), COALESCE(period_debits, 0), COALESCE(period_credits, 0),
+        COALESCE(ending_balance, 0),
+        CASE WHEN ending_balance > 0 THEN ending_balance ELSE 0 END AS debit,
+        CASE WHEN ending_balance < 0 THEN 0 - ending_balance ELSE 0 END AS credit
+      FROM balances
+      WHERE COALESCE(beginning_balance, 0) <> 0 OR COALESCE(period_debits, 0) <> 0
+        OR COALESCE(period_credits, 0) <> 0 OR COALESCE(ending_balance, 0) <> 0
+        OR 1 = 1  -- if include_zero
+      ORDER BY Account, AccountKey
+    tsql: |
+      WITH balances AS (
+        SELECT a.AccountKey, a.Account, a.AccountDesc, a.AccountType,
+          SUM(CASE WHEN h.FiscalPeriod < :period
+                   THEN ISNULL(h.BeginningBalance, 0) + ISNULL(h.DebitAmount, 0) - ISNULL(h.CreditAmount, 0)
+                   WHEN h.FiscalPeriod = :period THEN ISNULL(h.BeginningBalance, 0) ELSE 0 END) AS beginning_balance,
+          SUM(CASE WHEN h.FiscalPeriod = :period THEN ISNULL(h.DebitAmount, 0) ELSE 0 END) AS period_debits,
+          SUM(CASE WHEN h.FiscalPeriod = :period THEN ISNULL(h.CreditAmount, 0) ELSE 0 END) AS period_credits,
+          SUM(CASE WHEN h.FiscalPeriod <= :period
+                   THEN ISNULL(h.BeginningBalance, 0) + ISNULL(h.DebitAmount, 0) - ISNULL(h.CreditAmount, 0)
+                   ELSE 0 END) AS ending_balance
+        FROM GL_Account a
+        LEFT JOIN GL_PeriodPostingHistory h ON h.AccountKey = a.AccountKey AND h.FiscalYear = :fiscal_year
+        GROUP BY a.AccountKey, a.Account, a.AccountDesc, a.AccountType
+      )
+      SELECT ISNULL(Account, '') AS Account, ISNULL(AccountDesc, '') AS AccountDesc, ISNULL(AccountType, '') AS AccountType,
+        ISNULL(beginning_balance, 0) AS beginning_balance, ISNULL(period_debits, 0) AS period_debits,
+        ISNULL(period_credits, 0) AS period_credits, ISNULL(ending_balance, 0) AS ending_balance,
+        CASE WHEN ending_balance > 0 THEN ending_balance ELSE 0 END AS debit,
+        CASE WHEN ending_balance < 0 THEN 0 - ending_balance ELSE 0 END AS credit
+      FROM balances
+      WHERE ISNULL(beginning_balance, 0) <> 0 OR ISNULL(period_debits, 0) <> 0
+        OR ISNULL(period_credits, 0) <> 0 OR ISNULL(ending_balance, 0) <> 0
+        OR 1 = 1  -- if include_zero
+      ORDER BY Account, AccountKey
+notes:
+  - The view reads GL_PeriodPostingHistory, so unposted journal entries (GL_GeneralJournalHeader) are not in it.

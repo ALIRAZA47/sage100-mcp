@@ -1,0 +1,103 @@
+# Driver errors mapped to stable codes (SPEC.md §14.3). The first matching rule wins. A rule matches
+# on SQLSTATE, the native error number, or a message fragment (regex), and optionally on the phase
+# (connect or execute). tests/fixtures/errors/<backend>.yaml holds a real message for each rule.
+sqlserver:
+  - code: AUTH_FAILED
+    native: [18456, 18452, 18470, 18486, 18487, 18488]
+    hint: Check the login stored in the backend's credential, and that SQL Server accepts SQL logins.
+  - code: DRIVER_NOT_INSTALLED
+    sqlstate: [IM002]
+    message: "Can't open lib"  # unixODBC reports a missing driver as 01000
+    hint: Install the Microsoft ODBC Driver for SQL Server named in the backend's driver setting.
+  - code: BITNESS_MISMATCH
+    sqlstate: [IM014]
+    hint: The ODBC driver's bitness differs from this process's; run sage100-mcp doctor.
+  - code: COMPANY_NOT_FOUND
+    native: [4060, 911]
+    hint: The company database does not exist or this login cannot open it.
+  - code: PERMISSION_DENIED
+    native: [229, 230, 262, 297, 300, 916]
+    hint: SQL Server refused the read (layer 1 of the security model); a DBA grants SELECT per table.
+  - code: LOCK_TIMEOUT
+    native: [1222]
+    hint: Sage users hold locks on these rows; try again shortly.
+  - code: QUERY_TIMEOUT
+    sqlstate: [HYT00, HYT01]
+    phase: execute
+    hint: Add filters on key columns or a date range, or ask for fewer rows.
+  - code: BACKEND_UNREACHABLE
+    sqlstate: [HYT00, HYT01, "08001", "08S01", "08004"]
+    hint: Check that the SQL Server is running and reachable from this host, and its TLS settings.
+  - code: UNKNOWN_TABLE
+    native: [208]
+    hint: The catalog may be out of date; refresh_catalog rebuilds it.
+  - code: UNKNOWN_COLUMN
+    native: [207, 209]
+    hint: The catalog may be out of date; refresh_catalog rebuilds it.
+  - code: DRIVER_NOT_CAPABLE
+    sqlstate: [HYC00]
+    hint: The ODBC driver lacks a feature the server asked for; run sage100-mcp doctor and report the detail.
+  - code: DIALECT_UNSUPPORTED
+    native: [102, 156, 170, 195, 4145]
+    hint: SQL Server rejected the generated statement; simplify it or report it with the sent SQL.
+# ProvideX (Sage 100 Standard/Advanced). Sage's driver seldom reports native error numbers, so its
+# rules match message fragments; tests/fixtures/errors/providex.yaml cites where each was seen.
+providex:
+  # sage100-mcp's own 32-bit driver helper (docs/decisions.md D67), ahead of the driver's rules: its
+  # messages carry SQLSTATEs the driver also uses.
+  - code: DRIVER_NOT_INSTALLED
+    message: "\\[sage100-mcp\\]\\[32-bit helper\\]The 32-bit driver helper could not start"
+    hint: >-
+      This backend loads Sage's 32-bit driver through sage100-mcp's 32-bit helper, which is missing or would
+      not start. Reinstall sage100-mcp from its MSI, or set the backend's helper to a 32-bit python.exe that
+      has pyodbc; then run sage100-mcp doctor.
+  - code: BACKEND_UNREACHABLE
+    message: "\\[sage100-mcp\\]\\[32-bit helper\\]The 32-bit driver helper stopped"
+    hint: >-
+      The process that loads Sage's 32-bit driver stopped, perhaps because the driver crashed; the next call
+      starts it again. The server log has its last lines.
+  - code: DRIVER_NOT_INSTALLED
+    sqlstate: [IM002]
+    message: "Can't open lib"
+    hint: Install Sage 100 Workstation Setup on this host (it installs the MAS 90 4.0 ODBC Driver); run sage100-mcp doctor.
+  - code: BITNESS_MISMATCH
+    sqlstate: [IM014]
+    hint: The Sage ODBC driver's bitness differs from this process's; run sage100-mcp doctor.
+  - code: AUTH_FAILED
+    message: "(?i)Logon failed"
+    hint: Check the Sage user and password in the backend's credential, and that the user is not locked in User Maintenance.
+  - code: COMPANY_NOT_FOUND
+    message: "(?i)Company \\w+ is not on file"
+    hint: The company code is not set up in this Sage install.
+  - code: CS_ODBC_UNREACHABLE
+    message: "(?i)Connection failure to host"
+    hint: Check that the Sage 100 Client Server ODBC Driver Service (PVXIOSVR) runs on the Sage server and that its TCP port (20222 by default) is open.
+  - code: DRIVER_INTERNAL
+    message: "(?i)\\]\\s*Internal error"
+    hint: >-
+      Sage's driver failed while reading. A stored date that is not valid is the usual cause; the server
+      retries once with Null Date on where the driver accepts that option. With the 64-bit driver over
+      Client/Server ODBC, a table that has grown into a second file also fails this way. Try a narrower
+      date range, or ask the Sage administrator to check the table.
+  - code: PERMISSION_DENIED
+    message: "(?i)\\[FILEIO\\]\\s*Table is not access?ible"
+    hint: >-
+      Sage could not open this table's data file. The module may not be set up for this company, the Sage
+      user's ODBC Security role may block the table, or the share may deny this Windows account.
+  - code: QUERY_TIMEOUT
+    sqlstate: [HYT00, HYT01, HY008]
+    message: "(?i)Timeout expired|Operation cancell?ed"
+    phase: execute
+    hint: Add filters on key columns or a date range, or ask for fewer rows.
+  - code: BACKEND_UNREACHABLE
+    sqlstate: [HYT00, HYT01, "08001", "08S01"]
+    phase: connect
+    hint: Check that the Sage share (the backend's directory) is reachable from this host as this Windows account.
+  - code: DRIVER_NOT_CAPABLE
+    sqlstate: [HYC00]
+    message: "(?i)Driver not capable"
+    hint: The Sage driver lacks a feature the server asked for; run sage100-mcp doctor and report the detail.
+  - code: DIALECT_UNSUPPORTED
+    sqlstate: ["37000", "42000"]
+    message: "(?i)Unexpected extra token|Expected lexical element not found|unexpected token encountered"
+    hint: The Sage driver rejected the statement; mode='auto' or 'hybrid' runs what the driver can't, locally.

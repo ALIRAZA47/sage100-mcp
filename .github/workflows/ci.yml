@@ -1,0 +1,138 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Tiers 1, 2 and 6 (SPEC.md §15): unit, emulator and MCP contract tests, on any OS, every commit.
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy --strict src tests scripts
+      - run: uv run pytest -m "not windows" --log-file=build/pytest.log --log-file-level=DEBUG --basetemp=build/tmp
+      - name: Security check - no password, token or masked value in logs, audit files or error details
+        run: uv run python scripts/log_scan.py build/pytest.log build/tmp --testbed
+      - name: Exit gate - the packaged CLI answers sage_status over stdio
+        run: uv run python scripts/stdio_smoke.py uvx --from . sage100-mcp stdio
+
+  service:
+    # M6: the Windows service end to end on a hosted runner, which runs as Administrator: install as
+    # LocalSystem, start, answer sage_status over HTTP, stop and remove (scripts/service_smoke.py).
+    name: service (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run python scripts/service_smoke.py
+
+  helper32:
+    # M6: the 32-bit driver helper (docs/decisions.md D67) on a hosted runner. Windows ships 32-bit-only
+    # ODBC drivers (Jet's text driver), so the 64-bit server reads a CSV file through a 32-bit Python
+    # running helper.py, after showing it can't load that driver itself (scripts/helper_smoke.py).
+    name: 32-bit helper (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        id: x86
+        with:
+          python-version: "3.12"
+          architecture: x86
+      - run: '& "${{ steps.x86.outputs.python-path }}" -m pip install pyodbc==5.3.0'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run python scripts/helper_smoke.py --helper "${{ steps.x86.outputs.python-path }}"
+
+  premium:
+    # The Premium (SQL Server) backend against a real SQL Server: tests/premium_testbed.py builds
+    # Sage-shaped company databases with synthetic rows, and the read-only login comes from
+    # scripts/premium_readonly.sql. The sa password only guards this throwaway container.
+    name: premium (SQL Server 2022)
+    runs-on: ubuntu-latest
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: Sage100-mcp-CI-sa-1
+        ports: ["1433:1433"]
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P Sage100-mcp-CI-sa-1 -C -Q 'SELECT 1'"
+          --health-interval 10s --health-timeout 5s --health-retries 12
+    env:
+      SAGE100_MCP_TEST_SQLSERVER: localhost
+      SAGE100_MCP_TEST_SA_PASSWORD: Sage100-mcp-CI-sa-1
+    steps:
+      - uses: actions/checkout@v5
+      - name: Microsoft ODBC Driver 18 for SQL Server
+        run: |
+          if ! odbcinst -q -d -n "ODBC Driver 18 for SQL Server" > /dev/null 2>&1; then
+            curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+              | sudo gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+            curl -fsSL "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list" \
+              | sudo tee /etc/apt/sources.list.d/mssql-release.list
+            sudo apt-get update
+            sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc
+          fi
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest -m premium -ra --log-file=build/pytest.log --log-file-level=DEBUG --basetemp=build/tmp
+      - name: Security check - no password, token or masked value in logs, audit files or error details
+        run: uv run python scripts/log_scan.py build/pytest.log build/tmp --testbed
+
+  sage-driver:
+    # Tiers 3-5 (SPEC.md §15.3-15.4) need a self-hosted Windows runner with Sage 100 and the ABC
+    # sample company. Set the repository variable SAGE_RUNNER to "true" once that runner exists, and
+    # the secrets below for its Sage login. tests/windows/test_m2_gate.py is the M2 exit gate: the
+    # probe's JSON per driver build, and the 50 sample queries against ABC. test_m3_reconciliation.py is
+    # M3's: each view against ABC's report goldens in tests/reconciliation/abc (docs/reconciliation.md).
+    # The 32-bit leg (Sage 2024's 32-bit driver) runs the same suite through the 32-bit helper: set
+    # SAGE100_MCP_TEST_PROVIDEX_HELPER to a 32-bit python.exe with pyodbc (docs/decisions.md D67).
+    if: vars.SAGE_RUNNER == 'true'
+    name: sage driver (self-hosted, x64)
+    runs-on: [self-hosted, windows, sage100]
+    env:
+      SAGE100_MCP_TEST_PROVIDEX_DIRECTORY: ${{ vars.SAGE_MAS90_DIRECTORY }}
+      SAGE100_MCP_TEST_PROVIDEX_COMPANY: ABC
+      SAGE100_MCP_TEST_PROVIDEX_USER: ${{ secrets.SAGE_TEST_USER }}
+      SAGE100_MCP_TEST_PROVIDEX_PASSWORD: ${{ secrets.SAGE_TEST_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run pytest -m windows -ra

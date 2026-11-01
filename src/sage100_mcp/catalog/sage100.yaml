@@ -1,0 +1,609 @@
+# Curated catalog overlay (SPEC.md §7.2): what core Sage 100 tables mean, their keys, join paths,
+# the columns that matter, and code meanings. The live catalog says what exists; where the two
+# disagree the live catalog wins and the difference is reported as drift.
+#
+# Column names were checked against Outova's MAS_EMP (Sage 100 2024 data, version 7.3) on
+# 2026-10-29. `observed` lists code values seen in that data; meanings come from Sage's field help
+# and are confirmed per site, not assumed (§6.4).
+#
+# Per table: purpose, key, core (columns shown by default), joins ({name: {table, on}} where `on`
+# is a list of shared column names or a {local: foreign} mapping), semantics ({column: semantic}
+# or {column: {semantic, enum, observed, description}}), default_filters (applied by the canned
+# views, and suggested to the model), requires_filter (big history tables), notes.
+version: 1
+
+modules:
+  AR: Accounts Receivable
+  AP: Accounts Payable
+  SO: Sales Order
+  PO: Purchase Order
+  IM: Inventory Management
+  CI: Common Information
+  GL: General Ledger
+  BM: Bill of Materials
+  BR: Bank Reconciliation
+  BC: Bar Code
+  MB: Multi-Bin locations (add-on)
+  SC: Warehouse checking, packing and receiving (add-on)
+  ES: View and dashboard selection
+  FL: Fixed assets link
+  JC: Job Cost
+  PR: Payroll
+  WO: Work Order
+  RA: Return Merchandise Authorization
+  AR234: Avalara AvaTax (add-on)
+
+# Prefixes that belong to third-party add-ons. Developer-coded names (AR234_, BC_140_, CI_519,
+# and columns such as D519SF_ or AVA234_) are recognised by pattern as well.
+third_party_modules: [MB, SC, AR234]
+
+tables:
+  # --- Accounts Receivable -------------------------------------------------------------------
+  AR_Customer:
+    purpose: Customer master, one row per customer within a division
+    key: [ARDivisionNo, CustomerNo]
+    core: [ARDivisionNo, CustomerNo, CustomerName, City, State, ZipCode, CountryCode, TelephoneNo, EmailAddress,
+           ContactCode, TermsCode, SalespersonDivisionNo, SalespersonNo, CustomerType, PriceLevel, CreditLimit,
+           CreditHold, CustomerStatus, CurrentBalance, OpenOrderAmt, DateEstablished, DateLastActivity, DateLastPayment]
+    joins:
+      terms: {table: AR_TermsCode, on: [TermsCode]}
+      salesperson: {table: AR_Salesperson, on: [SalespersonDivisionNo, SalespersonNo]}
+      division: {table: AR_Division, on: [ARDivisionNo]}
+      contacts: {table: AR_CustomerContact, on: [ARDivisionNo, CustomerNo]}
+      ship_to: {table: AR_ShipToAddress, on: [ARDivisionNo, CustomerNo]}
+    semantics:
+      CreditHold: flag
+      CustomerStatus: {enum: {A: Active, I: Inactive}, observed: [A, I]}
+      CurrentBalance:
+        semantic: money
+        description: The not-yet-due part of the balance at DateLastAging; AgingCategory1-4 hold the past-due parts
+      AgingCategory1: {semantic: money, description: Balance in the first past-due aging category at DateLastAging}
+      AgingCategory2: {semantic: money, description: Balance in the second past-due aging category at DateLastAging}
+      AgingCategory3: {semantic: money, description: Balance in the third past-due aging category at DateLastAging}
+      AgingCategory4: {semantic: money, description: Balance in the oldest aging category at DateLastAging}
+      DateLastAging: {semantic: date, description: When Sage last aged this customer; AR_OpenInvoice is the live figure}
+      OpenOrderAmt:
+        semantic: money
+        description: The customer's standard and back orders, freight and sales tax included and discounts taken off
+    notes:
+      - The customer key is ARDivisionNo plus CustomerNo, even when divisions are off (AR_Options.Divisions = N).
+
+  AR_OpenInvoice:
+    purpose: Open and recently paid AR documents; the source for aging
+    key: [ARDivisionNo, CustomerNo, InvoiceNo, InvoiceType]
+    core: [ARDivisionNo, CustomerNo, InvoiceNo, InvoiceType, InvoiceDate, InvoiceDueDate, InvoiceDiscountDate,
+           PostingDate, TermsCode, SalespersonDivisionNo, SalespersonNo, CustomerPONo, Balance, DiscountAmt,
+           TaxableAmt, NonTaxableAmt, FreightAmt, SalesTaxAmt]
+    joins:
+      customer: {table: AR_Customer, on: [ARDivisionNo, CustomerNo]}
+      terms: {table: AR_TermsCode, on: [TermsCode]}
+      salesperson: {table: AR_Salesperson, on: [SalespersonDivisionNo, SalespersonNo]}
+      history: {table: AR_InvoiceHistoryHeader, on: {InvoiceNo: InvoiceNo, InvoiceHistoryHeaderSeqNo: HeaderSeqNo}}
+    semantics:
+      InvoiceType:
+        enum: {IN: Invoice, CM: Credit memo, DM: Debit memo, FC: Finance charge, PP: Prepayment}
+        observed: [IN, CM, FC, PP]
+      Balance: {semantic: money, description: Amount still owed; negative for credit memos and prepayments}
+    default_filters: ["Balance <> 0"]
+    notes:
+      - Fully paid invoices stay until purged (AR_Options.DaysToRetainPaidInvs), so open AR always filters Balance <> 0.
+      - Aging basis and bucket starts come from AR_Options (AgeInvoicesBy, AgingCategory1-4).
+
+  AR_InvoiceHistoryHeader:
+    purpose: Posted AR invoices, credit memos and adjustments (header)
+    key: [InvoiceNo, HeaderSeqNo]
+    core: [InvoiceNo, HeaderSeqNo, InvoiceType, InvoiceDate, TransactionDate, ARDivisionNo, CustomerNo, InvoiceDueDate,
+           SalesOrderNo, CustomerPONo, SalespersonDivisionNo, SalespersonNo, WarehouseCode, ShipDate, TaxableSalesAmt,
+           NonTaxableSalesAmt, FreightAmt, SalesTaxAmt, CostOfSalesAmt, DiscountAmt]
+    joins:
+      lines: {table: AR_InvoiceHistoryDetail, on: [InvoiceNo, HeaderSeqNo]}
+      customer: {table: AR_Customer, on: [ARDivisionNo, CustomerNo]}
+      salesperson: {table: AR_Salesperson, on: [SalespersonDivisionNo, SalespersonNo]}
+    semantics:
+      InvoiceType:
+        enum: {IN: Invoice, CM: Credit memo, DM: Debit memo, FC: Finance charge, AD: Adjustment}
+        observed: [IN, CM, DM, FC, AD]
+    requires_filter: true
+    notes:
+      - Join lines on InvoiceNo plus HeaderSeqNo; an invoice number can repeat across sequence numbers.
+
+  AR_InvoiceHistoryDetail:
+    purpose: Posted AR invoice lines
+    key: [InvoiceNo, HeaderSeqNo, DetailSeqNo]
+    core: [InvoiceNo, HeaderSeqNo, DetailSeqNo, ItemCode, ItemType, ItemCodeDesc, WarehouseCode, ProductLine,
+           UnitOfMeasure, QuantityOrdered, QuantityShipped, QuantityBackordered, UnitPrice, UnitCost, ExtensionAmt,
+           SalesAcctKey, PromiseDate]
+    joins:
+      header: {table: AR_InvoiceHistoryHeader, on: [InvoiceNo, HeaderSeqNo]}
+      item: {table: CI_Item, on: [ItemCode]}
+      warehouse: {table: IM_Warehouse, on: [WarehouseCode]}
+      product_line: {table: IM_ProductLine, on: [ProductLine]}
+      sales_account: {table: GL_Account, on: {SalesAcctKey: AccountKey}}
+    semantics:
+      ItemType: {enum: {"1": Regular, "2": Special, "3": Charge, "4": Comment, "5": Miscellaneous}}
+      ExtensionAmt: {semantic: money, description: Line revenue}
+    requires_filter: true
+
+  AR_CashReceiptsHistory:
+    purpose: Posted cash receipts and the invoices they paid
+    core: [DepositNo, DepositDate, ARDivisionNo, CustomerNo, CheckNo, PostingDate, TransactionType, InvoiceNo, InvoiceType,
+           PaymentType, CashAmountApplied, DiscountAmountApplied, InvoiceBalance]
+    joins:
+      customer: {table: AR_Customer, on: [ARDivisionNo, CustomerNo]}
+    requires_filter: true
+
+  AR_TransactionPaymentHistory:
+    purpose: Payments and adjustments applied to each AR invoice; used for historical aging
+    core: [ARDivisionNo, CustomerNo, InvoiceNo, InvoiceType, TransactionDate, SequenceNo, TransactionType, PaymentDate,
+           PaymentType, CheckNo, TransactionAmt]
+    joins:
+      customer: {table: AR_Customer, on: [ARDivisionNo, CustomerNo]}
+      open_invoice: {table: AR_OpenInvoice, on: [ARDivisionNo, CustomerNo, InvoiceNo, InvoiceType]}
+    requires_filter: true
+
+  AR_Division:
+    purpose: AR divisions and their GL accounts
+    key: [ARDivisionNo]
+    core: [ARDivisionNo, ARDivisionDesc, AccountsReceivableAcctKey, CashAcctKey]
+
+  AR_TermsCode:
+    purpose: Customer payment terms
+    key: [TermsCode]
+    core: [TermsCode, TermsCodeDesc, DaysBeforeDue, DaysBeforeDiscountDue, DiscountRate]
+
+  AR_Salesperson:
+    purpose: Salespeople and commission rates
+    key: [SalespersonDivisionNo, SalespersonNo]
+    core: [SalespersonDivisionNo, SalespersonNo, SalespersonName, EmailAddress, CommissionRate, SalesManagerNo]
+
+  AR_ShipToAddress:
+    purpose: Customer ship-to addresses
+    key: [ARDivisionNo, CustomerNo, ShipToCode]
+    core: [ARDivisionNo, CustomerNo, ShipToCode, ShipToName, ShipToCity, ShipToState, ShipToZipCode, WarehouseCode, ShipVia]
+    joins:
+      customer: {table: AR_Customer, on: [ARDivisionNo, CustomerNo]}
+
+  AR_CustomerContact:
+    purpose: Customer contacts
+    key: [ARDivisionNo, CustomerNo, ContactCode]
+    core: [ARDivisionNo, CustomerNo, ContactCode, ContactName, ContactTitle, TelephoneNo1, EmailAddress]
+    joins:
+      customer: {table: AR_Customer, on: [ARDivisionNo, CustomerNo]}
+
+  AR_Options:
+    purpose: Accounts Receivable settings (one row), including aging rules and the current period
+    key: [ModuleCode]
+    core: [ModuleCode, CompanyCode, DataVersion, Divisions, AgeInvoicesBy, AgingCategory1, AgingCategory2, AgingCategory3,
+           AgingCategory4, CurrentFiscalYr, CurrentPeriod, DaysToRetainPaidInvs]
+    semantics:
+      Divisions: flag
+      AgeInvoicesBy: {enum: {D: Due date, I: Invoice date}, observed: [D]}
+      AgingCategory: {enum: {D: Days, M: Months}, observed: [D], description: The unit of AgingCategory1-4}
+      AgingCategoryCalc:
+        enum: {C: Current, "1": Aging category 1, "2": Aging category 2, "3": Aging category 3, "4": Aging category 4}
+        observed: [C]
+        description: The aging category finance charges start from
+      AgingCategory1: {semantic: number, description: First day (or month) of the first past-due aging category}
+      AgingCategory2: {semantic: number, description: First day (or month) of the second aging category}
+      AgingCategory3: {semantic: number, description: First day (or month) of the third aging category}
+      AgingCategory4: {semantic: number, description: First day (or month) of the last aging category}
+    notes:
+      - CurrentFiscalYr and CurrentPeriod are the module's period, which can lag the calendar.
+
+  # --- Accounts Payable ----------------------------------------------------------------------
+  AP_Vendor:
+    purpose: Vendor master, one row per vendor within a division
+    key: [APDivisionNo, VendorNo]
+    core: [APDivisionNo, VendorNo, VendorName, City, State, ZipCode, CountryCode, TelephoneNo, EmailAddress, TermsCode,
+           HoldPayment, VendorType, Form1099, VendorStatus, BalanceDue, LastPurchaseDate, LastPaymentDate, AverageDaysToPay]
+    joins:
+      terms: {table: AP_TermsCode, on: [TermsCode]}
+      division: {table: AP_Division, on: [APDivisionNo]}
+    semantics:
+      HoldPayment: flag
+      Form1099: flag
+      TaxpayerIDSocialSecurityNo: {description: Masked by policy}
+
+  AP_OpenInvoice:
+    purpose: Open and recently paid AP invoices; the source for AP aging
+    key: [APDivisionNo, VendorNo, InvoiceNo]
+    core: [APDivisionNo, VendorNo, InvoiceNo, InvoiceDate, InvoiceDueDate, InvoiceDiscountDate, PostingDate, TermsCode,
+           HoldPayment, InvoiceAmt, DiscountAmt, Balance, CheckNo, CheckDate]
+    joins:
+      vendor: {table: AP_Vendor, on: [APDivisionNo, VendorNo]}
+      terms: {table: AP_TermsCode, on: [TermsCode]}
+    semantics:
+      HoldPayment: flag
+      Balance: {semantic: money, description: Amount still owed to the vendor}
+    default_filters: ["Balance <> 0"]
+    notes:
+      - Paid invoices stay until purged (AP_Options.DaysToRetainPaidInvs), so open AP filters Balance <> 0.
+      - There is no vendor name here; join AP_Vendor.
+
+  AP_InvoiceHistoryHeader:
+    purpose: Posted AP invoices and adjustments (header)
+    key: [InvoiceNo, HeaderSeqNo]
+    core: [InvoiceNo, HeaderSeqNo, InvoiceType, APDivisionNo, VendorNo, VendorName, InvoiceDate, InvoiceDueDate,
+           TransactionDate, PurchaseOrderNo, ReceiptNo, InvoiceAmt, NetInvoiceAmt, DiscountAmt, FreightAmt, TaxAmt]
+    joins:
+      lines: {table: AP_InvoiceHistoryDetail, on: [InvoiceNo, HeaderSeqNo]}
+      vendor: {table: AP_Vendor, on: [APDivisionNo, VendorNo]}
+    semantics:
+      InvoiceType: {enum: {I: Invoice, A: Adjustment}, observed: [I, A]}
+    requires_filter: true
+
+  AP_InvoiceHistoryDetail:
+    purpose: Posted AP invoice lines, with the GL account each was charged to
+    key: [InvoiceNo, HeaderSeqNo, DetailSeqNo]
+    core: [InvoiceNo, HeaderSeqNo, DetailSeqNo, AccountKey, ItemCode, ItemCodeDesc, WarehouseCode, QuantityInvoiced,
+           UnitCost, ExtensionAmt, JobNo]
+    joins:
+      header: {table: AP_InvoiceHistoryHeader, on: [InvoiceNo, HeaderSeqNo]}
+      account: {table: GL_Account, on: [AccountKey]}
+    requires_filter: true
+
+  AP_CheckHistoryHeader:
+    purpose: Checks and electronic payments issued to vendors
+    key: [BankCode, CheckNo, CheckSeqNo]
+    core: [BankCode, CheckNo, CheckSeqNo, CheckType, CheckDate, APDivisionNo, VendorNo, VendorName, CheckAmt,
+           ClearedBank, ClearedDate]
+    joins:
+      vendor: {table: AP_Vendor, on: [APDivisionNo, VendorNo]}
+    semantics:
+      ClearedBank: flag
+
+  AP_Division:
+    purpose: AP divisions and their GL accounts
+    key: [APDivisionNo]
+    core: [APDivisionNo, APDivisionDesc, AccountsPayableAcctKey, CashAcctKey]
+
+  AP_TermsCode:
+    purpose: Vendor payment terms
+    key: [TermsCode]
+    core: [TermsCode, TermsCodeDesc, DaysBeforeDue, DaysDiscountAllowed, DiscountRate]
+
+  AP_Options:
+    purpose: Accounts Payable settings (one row), including aging categories and the current period
+    key: [ModuleCode]
+    core: [ModuleCode, CompanyCode, DataVersion, Divisions, AgingCategoriesToUseForInv, AgingCategory1, AgingCategory2,
+           AgingCategory3, AgingCategory4, CurrentFiscalYr, CurrentPeriod, DaysToRetainPaidInvs]
+    semantics:
+      Divisions: flag
+      AgingCategoriesToUseForInv: {enum: {D: Days, M: Months}, observed: [D], description: The unit of AgingCategory1-4}
+      AgingCategory1: {semantic: number, description: First day (or month) of the first past-due aging category}
+      AgingCategory2: {semantic: number, description: First day (or month) of the second aging category}
+      AgingCategory3: {semantic: number, description: First day (or month) of the third aging category}
+      AgingCategory4: {semantic: number, description: First day (or month) of the last aging category}
+
+  # --- Sales Order ---------------------------------------------------------------------------
+  SO_SalesOrderHeader:
+    purpose: Open sales orders and quotes (header); completed orders move to history
+    key: [SalesOrderNo]
+    core: [SalesOrderNo, OrderDate, OrderType, OrderStatus, ShipExpireDate, ARDivisionNo, CustomerNo, BillToName,
+           ShipToName, CustomerPONo, WarehouseCode, SalespersonDivisionNo, SalespersonNo, TermsCode, ShipVia, TaxableAmt,
+           NonTaxableAmt, SalesTaxAmt, FreightAmt, DiscountAmt, DepositAmt, CancelReasonCode]
+    joins:
+      lines: {table: SO_SalesOrderDetail, on: [SalesOrderNo]}
+      customer: {table: AR_Customer, on: [ARDivisionNo, CustomerNo]}
+      salesperson: {table: AR_Salesperson, on: [SalespersonDivisionNo, SalespersonNo]}
+    semantics:
+      OrderType:
+        enum: {S: Standard order, B: Back order, Q: Quote, M: Master order, R: Repeating order}
+        observed: [S, B, Q]
+      OrderStatus: {enum: {N: New, O: Open, H: On hold}, observed: [N, O]}
+    notes:
+      - Holds quotes (OrderType Q); order backlog excludes Q, M and R.
+
+  SO_SalesOrderDetail:
+    purpose: Open sales order lines
+    key: [SalesOrderNo, LineKey]
+    core: [SalesOrderNo, LineKey, ItemCode, ItemType, ItemCodeDesc, WarehouseCode, UnitOfMeasure, PromiseDate,
+           QuantityOrdered, QuantityShipped, QuantityBackordered, UnitPrice, UnitCost, ExtensionAmt, DropShip, PurchaseOrderNo]
+    joins:
+      header: {table: SO_SalesOrderHeader, on: [SalesOrderNo]}
+      item: {table: CI_Item, on: [ItemCode]}
+      item_warehouse: {table: IM_ItemWarehouse, on: [ItemCode, WarehouseCode]}
+    semantics:
+      ItemType:
+        enum: {"1": Regular, "2": Special, "3": Charge, "4": Comment, "5": Miscellaneous}
+        observed: ["1", "2", "3", "4"]
+      DropShip: flag
+
+  SO_SalesOrderHistoryHeader:
+    purpose: Sales order history, including still-active orders, quotes, completed and deleted orders
+    key: [SalesOrderNo]
+    core: [SalesOrderNo, OrderDate, OrderType, OrderStatus, ARDivisionNo, CustomerNo, BillToName, CustomerPONo,
+           WarehouseCode, SalespersonDivisionNo, SalespersonNo, LastInvoiceDate, LastInvoiceNo, TaxableAmt, NonTaxableAmt,
+           SalesTaxAmt, FreightAmt, DiscountAmt, InvoicedAmt, CancelReasonCode]
+    joins:
+      lines: {table: SO_SalesOrderHistoryDetail, on: [SalesOrderNo]}
+      customer: {table: AR_Customer, on: [ARDivisionNo, CustomerNo]}
+    semantics:
+      OrderType:
+        enum: {S: Standard order, B: Back order, Q: Quote, M: Master order, R: Repeating order}
+        observed: [S, B, Q, ""]
+        description: Blank on older history rows
+      OrderStatus:
+        enum: {A: Active, C: Completed, Q: Quote, X: Deleted, Z: Deleted quote}
+        observed: [A, C, Q, X, Z]
+    requires_filter: true
+    notes:
+      - Holds still-active orders (A) and quotes (Q) as well as completed (C) ones, so filter OrderStatus.
+
+  SO_SalesOrderHistoryDetail:
+    purpose: Sales order history lines with original and revised quantities
+    key: [SalesOrderNo, SequenceNo]
+    core: [SalesOrderNo, SequenceNo, LineKey, CancelledLine, ItemCode, ItemType, ItemCodeDesc, WarehouseCode,
+           QuantityOrderedOriginal, QuantityOrderedRevised, QuantityShipped, QuantityBackordered, LastUnitPrice,
+           LastExtensionAmt, UnitCost, PromiseDate]
+    joins:
+      header: {table: SO_SalesOrderHistoryHeader, on: [SalesOrderNo]}
+      item: {table: CI_Item, on: [ItemCode]}
+    semantics:
+      CancelledLine: flag
+      ItemType: {enum: {"1": Regular, "2": Special, "3": Charge, "4": Comment, "5": Miscellaneous}}
+    requires_filter: true
+
+  SO_InvoiceHeader:
+    purpose: Sales invoices in progress (shipping and invoicing entry, not yet posted)
+    key: [InvoiceNo]
+    core: [InvoiceNo, InvoiceDate, InvoiceType, SalesOrderNo, OrderType, ARDivisionNo, CustomerNo, BillToName, ShipDate,
+           ShipVia, WarehouseCode, CustomerPONo, TaxableAmt, NonTaxableAmt, SalesTaxAmt, FreightAmt, DiscountAmt,
+           CostOfGoodsSoldAmt, BatchNo]
+    joins:
+      lines: {table: SO_InvoiceDetail, on: [InvoiceNo]}
+      order: {table: SO_SalesOrderHeader, on: [SalesOrderNo]}
+      customer: {table: AR_Customer, on: [ARDivisionNo, CustomerNo]}
+    notes:
+      - Posted invoices are in AR_InvoiceHistoryHeader.
+
+  SO_InvoiceDetail:
+    purpose: Lines of sales invoices in progress
+    key: [InvoiceNo, LineKey]
+    core: [InvoiceNo, LineKey, ItemCode, ItemType, ItemCodeDesc, WarehouseCode, QuantityOrdered, QuantityShipped,
+           QuantityBackordered, UnitPrice, UnitCost, ExtensionAmt, ExtendedCost, OrderLineKey]
+    joins:
+      header: {table: SO_InvoiceHeader, on: [InvoiceNo]}
+      item: {table: CI_Item, on: [ItemCode]}
+
+  # --- Purchase Order ------------------------------------------------------------------------
+  PO_PurchaseOrderHeader:
+    purpose: Purchase orders (header), including completed ones
+    key: [PurchaseOrderNo]
+    core: [PurchaseOrderNo, PurchaseOrderDate, OrderType, OrderStatus, OnHold, RequiredExpireDate, CompletionDate,
+           APDivisionNo, VendorNo, PurchaseName, WarehouseCode, ShipVia, TermsCode, TaxableAmt, NonTaxableAmt, SalesTaxAmt,
+           FreightAmt, ReceivedAmt, InvoicedAmt, BackOrderLostAmt, LastReceiptDate, LastInvoiceDate, SalesOrderNo]
+    joins:
+      lines: {table: PO_PurchaseOrderDetail, on: [PurchaseOrderNo]}
+      vendor: {table: AP_Vendor, on: [APDivisionNo, VendorNo]}
+    semantics:
+      OrderType: {enum: {S: Standard, D: Drop ship, M: Master, R: Repeating}, observed: [S]}
+      OrderStatus:
+        enum: {N: New, O: Open, B: Back order, C: Change, R: Received and not yet invoiced, X: Completed}
+        observed: [O, B, R, X]
+      OnHold: flag
+    notes:
+      - Completed POs (OrderStatus X) stay here; open POs filter OrderStatus IN ('N', 'O', 'B', 'C').
+
+  PO_PurchaseOrderDetail:
+    purpose: Purchase order lines with quantities ordered, received and invoiced
+    key: [PurchaseOrderNo, LineKey]
+    core: [PurchaseOrderNo, LineKey, ItemCode, ItemType, ItemCodeDesc, WarehouseCode, RequiredDate, QuantityOrdered,
+           QuantityReceived, QuantityBackordered, QuantityInvoiced, UnitCost, ExtensionAmt, ReceivedAmt, InvoicedAmt,
+           SalesOrderNo]
+    joins:
+      header: {table: PO_PurchaseOrderHeader, on: [PurchaseOrderNo]}
+      item: {table: CI_Item, on: [ItemCode]}
+      item_warehouse: {table: IM_ItemWarehouse, on: [ItemCode, WarehouseCode]}
+    semantics:
+      ItemType: {enum: {"1": Regular, "2": Special, "3": Charge, "4": Comment, "5": Miscellaneous}}
+
+  PO_ReceiptHistoryHeader:
+    purpose: Posted PO receipts and invoices (header)
+    core: [PurchaseOrderNo, ReceiptType, ReceiptNo, HeaderSeqNo, ReceiptDate, APDivisionNo, VendorNo, PurchaseName,
+           WarehouseCode, InvoiceNo, InvoiceDate, ReceiptAmt, InvoiceAmt, FreightAmt, SalesTaxAmt]
+    joins:
+      lines: {table: PO_ReceiptHistoryDetail, on: [PurchaseOrderNo, ReceiptType, ReceiptNo, HeaderSeqNo]}
+      order: {table: PO_PurchaseOrderHeader, on: [PurchaseOrderNo]}
+      vendor: {table: AP_Vendor, on: [APDivisionNo, VendorNo]}
+    requires_filter: true
+
+  PO_ReceiptHistoryDetail:
+    purpose: Posted PO receipt lines
+    core: [PurchaseOrderNo, ReceiptType, ReceiptNo, HeaderSeqNo, LineKey, ItemCode, ItemCodeDesc, WarehouseCode,
+           QuantityReceived, QuantityInvoiced, UnitCost, ExtensionAmt]
+    joins:
+      header: {table: PO_ReceiptHistoryHeader, on: [PurchaseOrderNo, ReceiptType, ReceiptNo, HeaderSeqNo]}
+      item: {table: CI_Item, on: [ItemCode]}
+    requires_filter: true
+
+  # --- Items and inventory -------------------------------------------------------------------
+  CI_Item:
+    purpose: Item master shared by all modules
+    key: [ItemCode]
+    core: [ItemCode, ItemType, ItemCodeDesc, ProductLine, ProductType, Valuation, InactiveItem, DefaultWarehouseCode,
+           PrimaryAPDivisionNo, PrimaryVendorNo, StandardUnitOfMeasure, SalesUnitOfMeasure, PurchaseUnitOfMeasure,
+           StandardUnitCost, StandardUnitPrice, AverageUnitCost, LastTotalUnitCost, TotalQuantityOnHand, TotalInventoryValue,
+           LastSoldDate, LastReceiptDate]
+    joins:
+      product_line: {table: IM_ProductLine, on: [ProductLine]}
+      warehouses: {table: IM_ItemWarehouse, on: [ItemCode]}
+      vendor: {table: AP_Vendor, on: {PrimaryAPDivisionNo: APDivisionNo, PrimaryVendorNo: VendorNo}}
+      extended_description: {table: CI_ExtendedDescription, on: [ExtendedDescriptionKey]}
+    semantics:
+      ItemType:
+        enum: {"1": Regular, "2": Special, "3": Charge, "4": Comment, "5": Miscellaneous}
+        observed: ["1", "3", "4", "5"]
+      Valuation:
+        enum: {"1": Standard, "2": Average, "3": FIFO, "4": LIFO, "5": Lot, "6": Serial}
+        observed: ["1", "2", "3", "5", "6", ""]
+      ProductType:
+        enum: {F: Finished good, R: Raw material, D: Discontinued, K: Kit}
+        observed: [F, D, K, R, ""]
+      InactiveItem: flag
+    notes:
+      - Quantities by warehouse are in IM_ItemWarehouse. There is no CI_ItemWarehouse table.
+
+  CI_UnitOfMeasure:
+    purpose: Units of measure and their conversions
+    key: [UnitOfMeasure]
+    core: [UnitOfMeasure, ConversionUM1, ConversionFactor1, ConversionUM2, ConversionFactor2]
+
+  CI_ExtendedDescription:
+    purpose: Long item and line descriptions, referenced by ExtendedDescriptionKey
+    key: [ExtendedDescriptionKey]
+    core: [ExtendedDescriptionKey, ExtendedDescriptionText]
+
+  IM_Options:
+    purpose: Inventory Management settings (one row), including which supply counts as available quantity
+    key: [ModuleCode]
+    core: [ModuleCode, CompanyCode, DataVersion, QuantityAvailableToInclude, CurrentFiscalYr, CurrentPeriod]
+    semantics:
+      QuantityAvailableToInclude:
+        enum: {P: Purchase orders, W: Work orders, B: Purchase and work orders, N: Neither}
+        description: The supply Item Inquiry adds to on hand less committed when it shows quantity available
+
+  IM_ItemWarehouse:
+    purpose: Quantities and cost of each item in each warehouse
+    key: [ItemCode, WarehouseCode]
+    core: [ItemCode, WarehouseCode, QuantityOnHand, QuantityOnSalesOrder, QuantityOnBackOrder, QuantityOnPurchaseOrder,
+           QuantityOnWorkOrder, QuantityRequiredForWO, QuantityInShipping, AverageCost, TotalWarehouseValue, ReorderPointQty,
+           EconomicOrderQty, MinimumOrderQty, MaximumOnHandQty, BinLocation]
+    joins:
+      item: {table: CI_Item, on: [ItemCode]}
+      warehouse: {table: IM_Warehouse, on: [WarehouseCode]}
+    notes:
+      - Available = OnHand - OnSalesOrder - OnBackOrder - RequiredForWO by default; config.yaml can change the formula.
+
+  IM_Warehouse:
+    purpose: Warehouses
+    key: [WarehouseCode]
+    core: [WarehouseCode, WarehouseDesc, WarehouseName, WarehouseCity, WarehouseState, WarehouseStatus]
+
+  IM_ItemCost:
+    purpose: Cost tiers (FIFO, LIFO, lot and serial layers) by item and warehouse
+    core: [ItemCode, WarehouseCode, TierType, ReceiptDate, ReceiptNo, LotSerialNo, UnitCost, QuantityOnHand,
+           QuantityCommitted, ExtendedCost]
+    joins:
+      item_warehouse: {table: IM_ItemWarehouse, on: [ItemCode, WarehouseCode]}
+
+  IM_ItemTransactionHistory:
+    purpose: Inventory movements by item, warehouse and date
+    core: [ItemCode, WarehouseCode, TransactionDate, TransactionCode, EntryNo, SequenceNo, TransactionQty, UnitCost,
+           UnitPrice, ExtendedCost, ExtendedPrice, ARDivisionNo, CustomerNo, APDivisionNo, VendorNo, FiscalCalYear,
+           FiscalCalPeriod]
+    joins:
+      item: {table: CI_Item, on: [ItemCode]}
+      warehouse: {table: IM_Warehouse, on: [WarehouseCode]}
+      customer: {table: AR_Customer, on: [ARDivisionNo, CustomerNo]}
+      vendor: {table: AP_Vendor, on: [APDivisionNo, VendorNo]}
+    semantics:
+      TransactionCode:
+        enum: {SO: Sales order invoice, PO: Purchase order receipt, IA: Adjustment, II: Issue, IR: Receipt, IT: Transfer}
+        observed: [BI, BR, IA, II, IN, IP, IR, IT, IX, IZ, PO, PZ, SI, SO, VR]
+        description: Codes beyond the six named here are site-specific until confirmed
+    requires_filter: true
+
+  IM_ProductLine:
+    purpose: Product lines and their default accounts and settings
+    key: [ProductLine]
+    core: [ProductLine, ProductLineDesc, ProductType, Valuation, SalesIncomeAcctKey, CostOfGoodsSoldAcctKey,
+           InventoryAcctKey, InactiveItem]
+    semantics:
+      InactiveItem: flag
+
+  IM_AliasItem:
+    purpose: Alternate item numbers used by customers, vendors or everyone
+    core: [ItemCode, AliasItemNo, Type, ARDivisionNo, CustomerNo, APDivisionNo, VendorNo, AliasItemDesc]
+    joins:
+      item: {table: CI_Item, on: [ItemCode]}
+
+  # --- General Ledger ------------------------------------------------------------------------
+  GL_Account:
+    purpose: Chart of accounts; everything else references AccountKey, not the formatted Account
+    key: [AccountKey]
+    core: [AccountKey, Account, AccountDesc, MainAccountCode, AccountType, AccountCategory, AccountGroup, Status,
+           ClearBalance, RollupCode1, RollupCode2, RollupCode3, RollupCode4]
+    joins:
+      account_type: {table: GL_AccountType, on: [AccountType]}
+      account_category: {table: GL_AccountCategory, on: [AccountCategory]}
+      account_group: {table: GL_AccountGroup, on: [AccountGroup]}
+    semantics:
+      Status: {enum: {A: Active, I: Inactive, D: Deleted}, observed: [A, D, I]}
+      ClearBalance: flag
+
+  GL_PeriodPostingHistory:
+    purpose: Beginning balance, debits and credits per account and fiscal period; the trial balance source
+    key: [AccountKey, FiscalYear, FiscalPeriod]
+    core: [AccountKey, FiscalYear, FiscalPeriod, BeginningBalance, DebitAmount, CreditAmount]
+    joins:
+      account: {table: GL_Account, on: [AccountKey]}
+      period: {table: GL_FiscalYearDetail, on: [FiscalYear, FiscalPeriod]}
+    notes:
+      - FiscalYear and FiscalPeriod are strings ('2024', '12').
+
+  GL_DetailPosting:
+    purpose: Every GL posting line with its source journal and document
+    core: [AccountKey, PostingDate, SourceJournal, JournalRegisterNo, SequenceNo, SourceModule, DocumentType, DocumentNo,
+           DebitAmount, CreditAmount, PostingComment]
+    joins:
+      account: {table: GL_Account, on: [AccountKey]}
+    requires_filter: true
+
+  GL_FiscalYear:
+    purpose: Fiscal years and their number of periods
+    key: [FiscalYear]
+    core: [FiscalYear, NumberOfPeriods]
+
+  GL_FiscalYearDetail:
+    purpose: Fiscal period ending dates
+    key: [FiscalYear, FiscalPeriod]
+    core: [FiscalYear, FiscalPeriod, PeriodEndingDate]
+
+  GL_GeneralJournalHeader:
+    purpose: General journal entries not yet posted (header)
+    key: [SourceJournal, EntryNo]
+    core: [SourceJournal, EntryNo, PostingDate, ReversingDate, JournalComment, BatchNo]
+    joins:
+      lines: {table: GL_GeneralJournalDetail, on: [SourceJournal, EntryNo]}
+
+  GL_GeneralJournalDetail:
+    purpose: General journal entry lines not yet posted
+    key: [SourceJournal, EntryNo, LineKey]
+    core: [SourceJournal, EntryNo, LineKey, AccountKey, DebitAmount, CreditAmount, PostingComment]
+    joins:
+      header: {table: GL_GeneralJournalHeader, on: [SourceJournal, EntryNo]}
+      account: {table: GL_Account, on: [AccountKey]}
+
+  GL_Budget:
+    purpose: Budget codes
+    key: [BudgetCode]
+    core: [BudgetCode, BudgetDesc, Permanent]
+
+  GL_PeriodBudgetDetail:
+    purpose: Budget amounts per account, budget code and fiscal period
+    key: [AccountKey, BudgetCode, FiscalYear, FiscalPeriod]
+    core: [AccountKey, BudgetCode, FiscalYear, FiscalPeriod, DebitAmount, CreditAmount]
+    joins:
+      account: {table: GL_Account, on: [AccountKey]}
+      budget: {table: GL_Budget, on: [BudgetCode]}
+
+  GL_AccountType:
+    purpose: Account types and the category each belongs to
+    key: [AccountType]
+    core: [AccountType, AccountTypeDesc, AccountCategory]
+
+  GL_AccountCategory:
+    purpose: Account categories
+    key: [AccountCategory]
+    core: [AccountCategory, AccountCategoryDesc]
+
+  GL_AccountGroup:
+    purpose: Account groups
+    key: [AccountGroup]
+    core: [AccountGroup, AccountGroupDesc, AccountCategory, AccountType]
+
+  GL_Options:
+    purpose: General Ledger settings (one row), including the current fiscal year and period
+    key: [ModuleCode]
+    core: [ModuleCode, CompanyCode, DataVersion, CurrentFiscalYr, CurrentPeriod]

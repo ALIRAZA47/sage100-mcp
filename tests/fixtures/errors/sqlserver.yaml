@@ -1,0 +1,66 @@
+# One driver message per rule in src/sage100_mcp/errors.yaml (SPEC.md §14.3), as pyodbc reports it:
+# exception args (sqlstate, message). Captured from SQL Server 2025 with ODBC Driver 18 on Linux on
+# 2026-10-29 unless the source says otherwise. Names and literals are from the synthetic test bed.
+- code: AUTH_FAILED
+  phase: connect
+  sqlstate: "28000"
+  message: "[28000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Login failed for user 'sage100_mcp_test'. (18456) (SQLDriverConnect)"
+- code: DRIVER_NOT_INSTALLED
+  phase: connect
+  sqlstate: "01000"
+  message: "[01000] [unixODBC][Driver Manager]Can't open lib 'ODBC Driver 18 for SQL Server' : file not found (0) (SQLDriverConnect)"
+- code: DRIVER_NOT_INSTALLED
+  phase: connect
+  sqlstate: IM002
+  source: Windows ODBC Driver Manager (documented message)
+  message: "[IM002] [Microsoft][ODBC Driver Manager] Data source name not found and no default driver specified (0) (SQLDriverConnect)"
+- code: BITNESS_MISMATCH
+  phase: connect
+  sqlstate: IM014
+  source: Windows ODBC Driver Manager (documented message)
+  message: "[IM014] [Microsoft][ODBC Driver Manager] The specified DSN contains an architecture mismatch between the Driver and Application (0) (SQLDriverConnect)"
+- code: COMPANY_NOT_FOUND
+  phase: connect
+  sqlstate: "42000"
+  message: '[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Cannot open database "MAS_ZZZ" requested by the login. The login failed. (4060) (SQLDriverConnect)'
+- code: PERMISSION_DENIED
+  phase: execute
+  sqlstate: "42000"
+  message: "[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]The SELECT permission was denied on the object 'AR_CustomerCreditCard', database 'MAS_EMP', schema 'dbo'. (229) (SQLExecDirectW)"
+- code: PERMISSION_DENIED
+  phase: execute
+  sqlstate: "42000"
+  message: "[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]The SELECT permission was denied on the column 'CreditCardVendor' of the object 'AP_Vendor', database 'MAS_EMP', schema 'dbo'. (230) (SQLExecDirectW)"
+- code: LOCK_TIMEOUT
+  phase: execute
+  sqlstate: "42000"
+  message: "[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Lock request time out period exceeded. (1222) (SQLExecDirectW)"
+- code: QUERY_TIMEOUT
+  phase: execute
+  sqlstate: HYT00
+  message: "[HYT00] [Microsoft][ODBC Driver 18 for SQL Server]Query timeout expired (0) (SQLExecDirectW)"
+- code: BACKEND_UNREACHABLE
+  phase: connect
+  sqlstate: HYT00
+  message: "[HYT00] [Microsoft][ODBC Driver 18 for SQL Server]Login timeout expired (0) (SQLDriverConnect)"
+- code: UNKNOWN_TABLE
+  phase: execute
+  sqlstate: 42S02
+  message: "[42S02] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Invalid object name 'AR_Nope'. (208) (SQLExecDirectW)"
+- code: UNKNOWN_COLUMN
+  phase: execute
+  sqlstate: 42S22
+  message: "[42S22] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Invalid column name 'Nope'. (207) (SQLExecDirectW)"
+- code: DRIVER_NOT_CAPABLE
+  phase: connect
+  sqlstate: HYC00
+  source: ODBC Driver for SQL Server (documented message)
+  message: "[HYC00] [Microsoft][ODBC Driver 18 for SQL Server]Optional feature not implemented (0) (SQLSetConnectAttr)"
+- code: DIALECT_UNSUPPORTED
+  phase: execute
+  sqlstate: "42000"
+  message: "[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]Incorrect syntax near 'DAY'. (102) (SQLExecDirectW)"
+- code: DIALECT_UNSUPPORTED
+  phase: execute
+  sqlstate: "42000"
+  message: "[42000] [Microsoft][ODBC Driver 18 for SQL Server][SQL Server]'DATE' is not a recognized built-in function name. (195) (SQLExecDirectW)"

@@ -1,0 +1,106 @@
+# Read-only statements sql/guard.py must accept, so the guard never drifts into over-blocking.
+# `tables` lists the catalog tables the statement reads (CTE names excluded).
+
+- sql: SELECT CustomerNo, CustomerName FROM AR_Customer
+  tables: [AR_Customer]
+- sql: SELECT TOP 10 * FROM AR_OpenInvoice WHERE Balance <> 0 ORDER BY Balance DESC
+  tables: [AR_OpenInvoice]
+- sql: SELECT * FROM AR_OpenInvoice WHERE Balance <> 0 ORDER BY InvoiceDueDate LIMIT 20
+  tables: [AR_OpenInvoice]
+- sql: SELECT [CustomerNo], [CustomerName] FROM [dbo].[AR_Customer] AS [c]
+  tables: [AR_Customer]
+- sql: SELECT c.CustomerNo FROM dbo.AR_Customer AS c
+  tables: [AR_Customer]
+- sql: |-
+    SELECT c.ARDivisionNo, c.CustomerNo, c.CustomerName, SUM(o.Balance) AS OpenBalance
+    FROM AR_Customer AS c
+    JOIN AR_OpenInvoice AS o ON o.ARDivisionNo = c.ARDivisionNo AND o.CustomerNo = c.CustomerNo
+    WHERE o.Balance <> 0
+    GROUP BY c.ARDivisionNo, c.CustomerNo, c.CustomerName
+    HAVING SUM(o.Balance) > 1000
+    ORDER BY OpenBalance DESC
+  tables: [AR_Customer, AR_OpenInvoice]
+- sql: SELECT h.SalesOrderNo, d.ItemCode FROM SO_SalesOrderHeader h LEFT JOIN SO_SalesOrderDetail d ON d.SalesOrderNo = h.SalesOrderNo
+  tables: [SO_SalesOrderHeader, SO_SalesOrderDetail]
+- sql: SELECT h.SalesOrderNo FROM SO_SalesOrderHeader h RIGHT OUTER JOIN SO_SalesOrderDetail d ON d.SalesOrderNo = h.SalesOrderNo
+  tables: [SO_SalesOrderHeader, SO_SalesOrderDetail]
+- sql: SELECT a.ItemCode FROM IM_ItemWarehouse a FULL OUTER JOIN CI_Item b ON b.ItemCode = a.ItemCode
+  tables: [IM_ItemWarehouse, CI_Item]
+- sql: SELECT a.ItemCode, b.WarehouseCode FROM CI_Item a CROSS JOIN IM_Warehouse b
+  tables: [CI_Item, IM_Warehouse]
+- sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo IN (SELECT CustomerNo FROM AR_OpenInvoice WHERE Balance > 0)
+  tables: [AR_Customer, AR_OpenInvoice]
+- sql: SELECT CustomerNo FROM AR_Customer c WHERE EXISTS (SELECT 1 FROM AR_OpenInvoice o WHERE o.CustomerNo = c.CustomerNo)
+  tables: [AR_Customer, AR_OpenInvoice]
+- sql: SELECT x.CustomerNo, x.Total FROM (SELECT CustomerNo, SUM(Balance) AS Total FROM AR_OpenInvoice GROUP BY CustomerNo) AS x
+  tables: [AR_OpenInvoice]
+- sql: |-
+    WITH open_ar AS (SELECT ARDivisionNo, CustomerNo, SUM(Balance) AS Total FROM AR_OpenInvoice WHERE Balance <> 0 GROUP BY ARDivisionNo, CustomerNo)
+    SELECT c.CustomerName, o.Total FROM open_ar o JOIN AR_Customer c ON c.ARDivisionNo = o.ARDivisionNo AND c.CustomerNo = o.CustomerNo
+  tables: [AR_OpenInvoice, AR_Customer]
+- sql: WITH r AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM r WHERE n < 10) SELECT n FROM r
+  tables: []
+- sql: SELECT ItemCode FROM CI_Item UNION SELECT ItemCode FROM IM_ItemWarehouse
+  tables: [CI_Item, IM_ItemWarehouse]
+- sql: SELECT ItemCode FROM CI_Item UNION ALL SELECT ItemCode FROM IM_ItemWarehouse ORDER BY ItemCode
+  tables: [CI_Item, IM_ItemWarehouse]
+- sql: SELECT ItemCode FROM CI_Item INTERSECT SELECT ItemCode FROM IM_ItemWarehouse
+  tables: [CI_Item, IM_ItemWarehouse]
+- sql: SELECT ItemCode FROM CI_Item EXCEPT SELECT ItemCode FROM IM_ItemWarehouse
+  tables: [CI_Item, IM_ItemWarehouse]
+- sql: SELECT CASE WHEN Balance < 0 THEN 'credit' WHEN Balance = 0 THEN 'paid' ELSE 'open' END AS State, COUNT(*) FROM AR_OpenInvoice GROUP BY CASE WHEN Balance < 0 THEN 'credit' WHEN Balance = 0 THEN 'paid' ELSE 'open' END
+  tables: [AR_OpenInvoice]
+- sql: SELECT COUNT(DISTINCT CustomerNo) FROM AR_OpenInvoice
+  tables: [AR_OpenInvoice]
+- sql: SELECT DISTINCT TermsCode FROM AR_Customer
+  tables: [AR_Customer]
+- sql: SELECT CustomerNo, ROW_NUMBER() OVER (PARTITION BY ARDivisionNo ORDER BY CustomerNo) AS rn FROM AR_Customer
+  tables: [AR_Customer]
+- sql: SELECT InvoiceNo, SUM(Balance) OVER (ORDER BY InvoiceDate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) FROM AR_OpenInvoice
+  tables: [AR_OpenInvoice]
+- sql: SELECT InvoiceNo, LAG(Balance) OVER (ORDER BY InvoiceDate), RANK() OVER (ORDER BY Balance DESC) FROM AR_OpenInvoice
+  tables: [AR_OpenInvoice]
+- sql: SELECT InvoiceNo, DATEDIFF(day, InvoiceDueDate, GETDATE()) AS DaysPastDue FROM AR_OpenInvoice WHERE Balance <> 0
+  tables: [AR_OpenInvoice]
+- sql: SELECT YEAR(InvoiceDate), MONTH(InvoiceDate), DATEPART(quarter, InvoiceDate), DATEADD(day, 30, InvoiceDate), EOMONTH(InvoiceDate) FROM AR_OpenInvoice
+  tables: [AR_OpenInvoice]
+- sql: SELECT ISNULL(EmailAddress, ''), COALESCE(TelephoneNo, ''), NULLIF(CustomerName, ''), IIF(CreditLimit > 0, 'Y', 'N') FROM AR_Customer
+  tables: [AR_Customer]
+- sql: SELECT UPPER(CustomerName), LOWER(CustomerNo), LEN(CustomerName), LEFT(CustomerName, 3), RIGHT(CustomerNo, 2), SUBSTRING(CustomerName, 2, 4), LTRIM(RTRIM(CustomerName)), REPLACE(CustomerName, ',', '') FROM AR_Customer
+  tables: [AR_Customer]
+- sql: SELECT CHARINDEX('Inc', CustomerName), PATINDEX('%Ltd%', CustomerName), CONCAT(ARDivisionNo, '-', CustomerNo), FORMAT(CreditLimit, 'N2') FROM AR_Customer
+  tables: [AR_Customer]
+- sql: SELECT CAST(Balance AS INT), CONVERT(VARCHAR(10), InvoiceDate, 120), TRY_CAST(CustomerPONo AS INT), ROUND(Balance, 0), ABS(Balance), FLOOR(Balance), CEILING(Balance) FROM AR_OpenInvoice
+  tables: [AR_OpenInvoice]
+- sql: SELECT STRING_AGG(CustomerNo, ',') FROM AR_Customer
+  tables: [AR_Customer]
+- sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerName LIKE 'A%' AND CreditLimit BETWEEN 100 AND 5000 AND TermsCode IS NOT NULL
+  tables: [AR_Customer]
+- sql: SELECT CustomerNo FROM AR_Customer WHERE ARDivisionNo = ? AND CustomerNo = ?
+  tables: [AR_Customer]
+  placeholders: 2
+- sql: SELECT InvoiceNo FROM AR_OpenInvoice WHERE InvoiceDate >= '2024-01-01' AND InvoiceDate < '2024-02-01'
+  tables: [AR_OpenInvoice]
+- sql: SELECT 'DELETE FROM AR_Customer; DROP TABLE x' AS harmless FROM AR_Customer
+  tables: [AR_Customer]
+- sql: SELECT '{call sp_who' AS still_a_string_but_refused_by_the_raw_check FROM AR_Customer
+  tables: [AR_Customer]
+  rejected: WRITE_BLOCKED
+- sql: SELECT [Delete], [Update], [Select] FROM AR_Customer
+  tables: [AR_Customer]
+- sql: SELECT CustomerNo /* the key */ FROM AR_Customer -- trailing note
+  tables: [AR_Customer]
+- sql: SELECT CustomerNo FROM AR_Customer;
+  tables: [AR_Customer]
+- sql: (SELECT CustomerNo FROM AR_Customer)
+  tables: [AR_Customer]
+- sql: SELECT v.a FROM (VALUES (1), (2), (3)) AS v(a)
+  tables: []
+- sql: SELECT N'Ünïcödé' AS label FROM AR_Customer
+  tables: [AR_Customer]
+- sql: SELECT 1 AS one
+  tables: []
+- sql: SELECT TOP 5 PERCENT InvoiceNo FROM AR_OpenInvoice ORDER BY Balance DESC
+  tables: [AR_OpenInvoice]
+- sql: SELECT InvoiceNo FROM AR_OpenInvoice ORDER BY InvoiceNo OFFSET 10 ROWS FETCH NEXT 10 ROWS ONLY
+  tables: [AR_OpenInvoice]

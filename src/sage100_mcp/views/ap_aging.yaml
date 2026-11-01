@@ -1,0 +1,162 @@
+# AP aging (SPEC.md §12.2).
+#
+# Bucket bounds and their unit come from AP_Options (AgingCategory1-4, AgingCategoriesToUseForInv D days
+# or M months) the same way AR's come from AR_Options; without usable categories the view ages at
+# 30/60/90/120 days and says so (AGING_DEFAULTS_USED). AP_Options stores no basis, because Sage's AP aging
+# report asks for one each time, so age_by does too, defaulting to the due date (docs/decisions.md D42).
+# Invoices with HoldPayment = Y are flagged, and left out when include_on_hold is false. AP_OpenInvoice
+# has no vendor name; it comes from AP_Vendor.
+name: ap_aging
+version: 1
+title: AP aging
+modules: [AP]
+description: >-
+  Accounts payable aging as of a date, per vendor or per invoice, in the company's own aging categories,
+  with invoices on payment hold flagged. Balances are current; as_of sets the aging date only.
+params:
+  as_of: {type: date, default: today, description: The aging date (balances are always current)}
+  vendor: {type: vendor, description: "Vendor number, or division-vendor such as 01-AIRWAY"}
+  detail: {type: choice, choices: [summary, invoice], default: summary, description: One row per vendor or per invoice}
+  age_by: {type: choice, choices: [due, invoice], default: due, description: Age from the due or the invoice date}
+  include_on_hold: {type: bool, default: true, description: Include invoices on payment hold}
+pulls:
+  - name: invoices
+    table: AP_OpenInvoice
+    columns: [APDivisionNo, VendorNo, InvoiceNo, InvoiceDate, InvoiceDueDate, HoldPayment, Balance]
+    where:
+      - {sql: "APDivisionNo = :vendor_division", if: vendor_division}
+      - {sql: "VendorNo = :vendor_no", if: vendor_no}
+      - "Balance <> 0"
+  - name: vendors
+    table: AP_Vendor
+    columns: [APDivisionNo, VendorNo, VendorName, TelephoneNo]
+    where:
+      - {sql: "APDivisionNo = :vendor_division", if: vendor_division}
+      - {sql: "VendorNo = :vendor_no", if: vendor_no}
+variant_param: detail
+variants:
+  summary:
+    totals: [bucket_0, bucket_1, bucket_2, bucket_3, bucket_4, total, on_hold]
+    columns:
+      - {name: APDivisionNo, type: varchar(2), semantic: code}
+      - {name: VendorNo, type: varchar(7), semantic: code}
+      - {name: VendorName, type: varchar(50), semantic: text}
+      - {name: TelephoneNo, type: varchar(20), semantic: text}
+      - {name: bucket_0, type: "decimal(17,2)", semantic: money, description: Not yet in a past-due category}
+      - {name: bucket_1, type: "decimal(17,2)", semantic: money}
+      - {name: bucket_2, type: "decimal(17,2)", semantic: money}
+      - {name: bucket_3, type: "decimal(17,2)", semantic: money}
+      - {name: bucket_4, type: "decimal(17,2)", semantic: money}
+      - {name: total, type: "decimal(17,2)", semantic: money}
+      - {name: on_hold, type: "decimal(17,2)", semantic: money, description: The part of the total on payment hold}
+    local: |
+      WITH aged AS (
+        SELECT i.APDivisionNo, i.VendorNo, i.Balance, COALESCE(i.HoldPayment, 'N') = 'Y' AS held,
+          COALESCE(date_diff({{unit}}, CASE WHEN :basis = 'due' THEN COALESCE(i.InvoiceDueDate, i.InvoiceDate)
+                                         ELSE i.InvoiceDate END, :as_of), 99999) AS days
+        FROM invoices i
+        WHERE i.Balance <> 0
+          AND COALESCE(i.HoldPayment, 'N') <> 'Y'  -- if not include_on_hold
+      ), totals AS (
+        SELECT APDivisionNo, VendorNo,
+          SUM(CASE WHEN days < :c1 THEN Balance ELSE 0 END) AS bucket_0,
+          SUM(CASE WHEN days >= :c1 AND days < :c2 THEN Balance ELSE 0 END) AS bucket_1,
+          SUM(CASE WHEN days >= :c2 AND days < :c3 THEN Balance ELSE 0 END) AS bucket_2,
+          SUM(CASE WHEN days >= :c3 AND days < :c4 THEN Balance ELSE 0 END) AS bucket_3,
+          SUM(CASE WHEN days >= :c4 THEN Balance ELSE 0 END) AS bucket_4,
+          SUM(Balance) AS total,
+          SUM(CASE WHEN held THEN Balance ELSE 0 END) AS on_hold
+        FROM aged
+        GROUP BY APDivisionNo, VendorNo
+      )
+      SELECT t.APDivisionNo, t.VendorNo, COALESCE(v.VendorName, ''), COALESCE(v.TelephoneNo, ''),
+        t.bucket_0, t.bucket_1, t.bucket_2, t.bucket_3, t.bucket_4, t.total, t.on_hold
+      FROM totals t
+      LEFT JOIN vendors v ON v.APDivisionNo = t.APDivisionNo AND v.VendorNo = t.VendorNo
+      ORDER BY t.APDivisionNo, t.VendorNo
+    tsql: |
+      WITH aged AS (
+        SELECT o.APDivisionNo, o.VendorNo, o.Balance,
+          CASE WHEN ISNULL(o.HoldPayment, 'N') = 'Y' THEN 1 ELSE 0 END AS held,
+          ISNULL(DATEDIFF({{unit}}, CASE WHEN :basis = 'due'
+                                    THEN COALESCE(NULLIF(o.InvoiceDueDate, '1753-01-01'), NULLIF(o.InvoiceDate, '1753-01-01'))
+                                    ELSE NULLIF(o.InvoiceDate, '1753-01-01') END, :as_of), 99999) AS days
+        FROM AP_OpenInvoice o
+        WHERE o.Balance <> 0
+          AND o.APDivisionNo = :vendor_division  -- if vendor_division
+          AND o.VendorNo = :vendor_no  -- if vendor_no
+          AND ISNULL(o.HoldPayment, 'N') <> 'Y'  -- if not include_on_hold
+      ), totals AS (
+        SELECT APDivisionNo, VendorNo,
+          SUM(CASE WHEN days < :c1 THEN Balance ELSE 0 END) AS bucket_0,
+          SUM(CASE WHEN days >= :c1 AND days < :c2 THEN Balance ELSE 0 END) AS bucket_1,
+          SUM(CASE WHEN days >= :c2 AND days < :c3 THEN Balance ELSE 0 END) AS bucket_2,
+          SUM(CASE WHEN days >= :c3 AND days < :c4 THEN Balance ELSE 0 END) AS bucket_3,
+          SUM(CASE WHEN days >= :c4 THEN Balance ELSE 0 END) AS bucket_4,
+          SUM(Balance) AS total,
+          SUM(CASE WHEN held = 1 THEN Balance ELSE 0 END) AS on_hold
+        FROM aged
+        GROUP BY APDivisionNo, VendorNo
+      )
+      SELECT t.APDivisionNo, t.VendorNo, ISNULL(v.VendorName, '') AS VendorName, ISNULL(v.TelephoneNo, '') AS TelephoneNo,
+        t.bucket_0, t.bucket_1, t.bucket_2, t.bucket_3, t.bucket_4, t.total, t.on_hold
+      FROM totals t
+      LEFT JOIN AP_Vendor v ON v.APDivisionNo = t.APDivisionNo AND v.VendorNo = t.VendorNo
+      ORDER BY t.APDivisionNo, t.VendorNo
+  invoice:
+    totals: [Balance]
+    columns:
+      - {name: APDivisionNo, type: varchar(2), semantic: code}
+      - {name: VendorNo, type: varchar(7), semantic: code}
+      - {name: VendorName, type: varchar(50), semantic: text}
+      - {name: InvoiceNo, type: varchar(20), semantic: code}
+      - {name: InvoiceDate, type: date, semantic: date}
+      - {name: InvoiceDueDate, type: date, semantic: date}
+      - {name: on_hold, type: bool, semantic: flag, description: HoldPayment is Y}
+      - {name: days, type: int, semantic: number, description: "Days (months, if the company ages by month) from the basis date to as_of"}
+      - {name: bucket, type: varchar(20), semantic: code}
+      - {name: Balance, type: "decimal(17,2)", semantic: money}
+    local: |
+      WITH aged AS (
+        SELECT i.APDivisionNo, i.VendorNo, i.InvoiceNo, i.InvoiceDate, i.InvoiceDueDate, i.Balance,
+          CASE WHEN COALESCE(i.HoldPayment, 'N') = 'Y' THEN 1 ELSE 0 END AS held,
+          date_diff({{unit}}, CASE WHEN :basis = 'due' THEN COALESCE(i.InvoiceDueDate, i.InvoiceDate)
+                                ELSE i.InvoiceDate END, :as_of) AS days
+        FROM invoices i
+        WHERE i.Balance <> 0
+          AND COALESCE(i.HoldPayment, 'N') <> 'Y'  -- if not include_on_hold
+      )
+      SELECT a.APDivisionNo, a.VendorNo, COALESCE(v.VendorName, ''), a.InvoiceNo, a.InvoiceDate, a.InvoiceDueDate,
+        a.held, a.days,
+        CASE WHEN COALESCE(a.days, 99999) < :c1 THEN :label_0 WHEN COALESCE(a.days, 99999) < :c2 THEN :label_1
+             WHEN COALESCE(a.days, 99999) < :c3 THEN :label_2 WHEN COALESCE(a.days, 99999) < :c4 THEN :label_3
+             ELSE :label_4 END,
+        a.Balance
+      FROM aged a
+      LEFT JOIN vendors v ON v.APDivisionNo = a.APDivisionNo AND v.VendorNo = a.VendorNo
+      ORDER BY a.APDivisionNo, a.VendorNo, a.InvoiceNo
+    tsql: |
+      WITH aged AS (
+        SELECT o.APDivisionNo, o.VendorNo, o.InvoiceNo, NULLIF(o.InvoiceDate, '1753-01-01') AS InvoiceDate,
+          NULLIF(o.InvoiceDueDate, '1753-01-01') AS InvoiceDueDate, o.Balance,
+          CASE WHEN ISNULL(o.HoldPayment, 'N') = 'Y' THEN 1 ELSE 0 END AS held,
+          DATEDIFF({{unit}}, CASE WHEN :basis = 'due'
+                             THEN COALESCE(NULLIF(o.InvoiceDueDate, '1753-01-01'), NULLIF(o.InvoiceDate, '1753-01-01'))
+                             ELSE NULLIF(o.InvoiceDate, '1753-01-01') END, :as_of) AS days
+        FROM AP_OpenInvoice o
+        WHERE o.Balance <> 0
+          AND o.APDivisionNo = :vendor_division  -- if vendor_division
+          AND o.VendorNo = :vendor_no  -- if vendor_no
+          AND ISNULL(o.HoldPayment, 'N') <> 'Y'  -- if not include_on_hold
+      )
+      SELECT a.APDivisionNo, a.VendorNo, ISNULL(v.VendorName, '') AS VendorName, a.InvoiceNo, a.InvoiceDate,
+        a.InvoiceDueDate, a.held, a.days,
+        CASE WHEN ISNULL(a.days, 99999) < :c1 THEN :label_0 WHEN ISNULL(a.days, 99999) < :c2 THEN :label_1
+             WHEN ISNULL(a.days, 99999) < :c3 THEN :label_2 WHEN ISNULL(a.days, 99999) < :c4 THEN :label_3
+             ELSE :label_4 END AS bucket,
+        a.Balance
+      FROM aged a
+      LEFT JOIN AP_Vendor v ON v.APDivisionNo = a.APDivisionNo AND v.VendorNo = a.VendorNo
+      ORDER BY a.APDivisionNo, a.VendorNo, a.InvoiceNo
+notes:
+  - Reconciles to Sage's AP Aged Invoice Report for the same aging date (tests/reconciliation).

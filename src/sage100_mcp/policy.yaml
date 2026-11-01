@@ -1,0 +1,28 @@
+# Table and column policy, layer 4 of SPEC.md §9. The server shows it read-only as sage://policy.
+# Point config.yaml's policy_file at a copy of this file to change it.
+
+# Denied tables are invisible: they are left out of the catalog, not just refused at query time.
+# Patterns are case-insensitive globs. A rule with a module can be lifted with allow_modules.
+deny_tables:
+  - pattern: PR_*
+    module: PR
+    reason: Payroll holds earnings, Social Security numbers and bank details. Add PR to allow_modules to opt in.
+  - pattern: SY_User*
+    reason: Sage users, roles and their settings.
+  - pattern: "*CreditCard*"
+    reason: Stored payment card data.
+  - pattern: "*Password*"
+    reason: Credentials.
+
+# Modules whose deny rules are lifted, e.g. [PR].
+allow_modules: []
+
+# Columns whose names match are returned as "***" and flagged masked: true. They can be selected
+# but not used to filter, join, group or sort, which would reveal their values indirectly.
+# SPEC.md §9.2's pattern plus socialsecurity, which is how Sage payroll names the SSN column.
+mask_columns: (?i)(ssn|socialsecurity|taxpayer|taxid|federalid|bankacct|bankaccount|routing|acctno|creditcard|cardno|paymentid|cvv|password|aes|encrypt)
+
+# Table.Column names the pattern matches that hold nothing sensitive in Sage 100.
+mask_exceptions:
+  - CI_Item.RoutingNo           # manufacturing routing, not a bank routing number
+  - IM_Options.NextCountCardNo  # next physical-count card number

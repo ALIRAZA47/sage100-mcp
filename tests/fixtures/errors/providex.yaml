@@ -1,0 +1,89 @@
+# One Sage ProvideX ODBC driver message per rule in src/sage100_mcp/errors.yaml (SPEC.md §14.3), in the
+# shape pyodbc reports: exception args (sqlstate, message), message "[STATE] text (native) (function)".
+# The text after the bracketed state is quoted from the source; where the source was another client
+# (.NET, mxODBC, a SQL Server linked server) the SQLSTATE and function are those pyodbc would add.
+- code: DRIVER_NOT_INSTALLED
+  phase: connect
+  sqlstate: IM003
+  source: sage100-mcp's 32-bit driver helper (src/sage100_mcp/bridge/client.py, not_started)
+  message: "[IM003] [sage100-mcp][32-bit helper]The 32-bit driver helper could not start: it exited with code 3: pyodbc can't be imported by C:\\Python312-32\\python.exe: No module named 'pyodbc'"
+- code: BACKEND_UNREACHABLE
+  phase: execute
+  sqlstate: 08S01
+  source: sage100-mcp's 32-bit driver helper (src/sage100_mcp/bridge/client.py, stopped)
+  message: "[08S01] [sage100-mcp][32-bit helper]The 32-bit driver helper stopped (exit code 3221225477)"
+- code: DRIVER_NOT_INSTALLED
+  phase: connect
+  sqlstate: IM002
+  source: Windows ODBC Driver Manager (documented message)
+  message: "[IM002] [Microsoft][ODBC Driver Manager] Data source name not found and no default driver specified (0) (SQLDriverConnect)"
+- code: BITNESS_MISMATCH
+  phase: connect
+  sqlstate: IM014
+  source: Windows ODBC Driver Manager (documented message)
+  message: "[IM014] [Microsoft][ODBC Driver Manager] The specified DSN contains an architecture mismatch between the Driver and Application (0) (SQLDriverConnect)"
+- code: AUTH_FAILED
+  phase: connect
+  sqlstate: S0000
+  source: https://communityhub.sage.com/us/sage100/f/personalization-customization-and-productivity-tools/78846/logon-failed-error-attempting-to-read-sage-100-erp-2014-data-using-asp-net-iis-8
+  message: "[S0000] [ProvideX][ODBC Driver][PVKIO]Logon failed (0) (SQLDriverConnect)"
+- code: COMPANY_NOT_FOUND
+  phase: connect
+  sqlstate: S1000
+  source: SPEC.md §8.3, citing https://help.truecommerce.com/en/articles/7889010-sage-100-error-error-logging-into-sage-100-company-xxx-is-not-on-file
+  message: "[S1000] [ProvideX][ODBC Driver]Company XYZ is not on file (0) (SQLDriverConnect)"
+- code: CS_ODBC_UNREACHABLE
+  phase: connect
+  sqlstate: "08001"
+  source: SPEC.md §14.2
+  message: "[08001] [ProvideX][ODBC Driver]Connection failure to host: [TCP]SAGESRV:20222 (0) (SQLDriverConnect)"
+- code: DRIVER_INTERNAL
+  phase: execute
+  sqlstate: S1000
+  source: https://communityhub.sage.com/us/sage100/f/technical-and-installation-discussions/175332/providex-odbc-driver-internal-error
+  message: "[S1000] [ProvideX][ODBC Driver] Internal Error (0) (SQLExecDirect)"
+- code: PERMISSION_DENIED
+  phase: execute
+  sqlstate: S1000
+  source: https://tek-tips.com/threads/providex-odbc-driver-fileio-table-is-not-accessible-12.1651208 and https://www.sqlservercentral.com/?p=1414793
+  message: "[S1000] [ProvideX][ODBC Driver][FILEIO]Table is not accessible (0) (SQLExecDirect)"
+- code: QUERY_TIMEOUT
+  phase: execute
+  sqlstate: HYT00
+  source: https://communityhub.sage.com/us/sage100/f/technical-and-installation-discussions/144700/linked-server-sage-returned-message-providex-odbc-driver-expected-lexical-element-not-found-identifier
+  message: "[HYT00] [ProvideX][ODBC Driver]Timeout expired. (0) (SQLExecDirect)"
+- code: QUERY_TIMEOUT
+  phase: execute
+  sqlstate: HY008
+  source: ODBC SQLCancel (documented state; the text is the emulator's)
+  message: "[HY008] [ProvideX][ODBC Driver]Operation canceled (0) (SQLExecDirect)"
+- code: BACKEND_UNREACHABLE
+  phase: connect
+  sqlstate: HYT00
+  source: Windows ODBC Driver Manager (documented message)
+  message: "[HYT00] [Microsoft][ODBC Driver Manager] Login timeout expired (0) (SQLDriverConnect)"
+- code: DRIVER_NOT_CAPABLE
+  phase: connect
+  sqlstate: HYC00
+  source: SPEC.md §14.2 (pyodbc's default autocommit=False sets SQL_ATTR_AUTOCOMMIT, which the driver refuses)
+  message: "[HYC00] [ProvideX][ODBC Driver]Driver not capable (0) (SQLSetConnectAttr)"
+- code: DIALECT_UNSUPPORTED
+  phase: execute
+  sqlstate: "37000"
+  source: https://lists.egenix.com/mailman-archives/egenix-users/2008-September/114436.html (SELECT ... LIMIT 5 on MAS 90; native error 1017)
+  message: "[37000] [ProvideX][ODBC Driver]Unexpected extra token: 5 (1017) (SQLExecDirect)"
+- code: DIALECT_UNSUPPORTED
+  phase: execute
+  sqlstate: "37000"
+  source: https://communityhub.sage.com/us/sage100/f/technical-and-installation-discussions/144700/linked-server-sage-returned-message-providex-odbc-driver-expected-lexical-element-not-found-identifier
+  message: "[37000] [ProvideX][ODBC Driver]Expected lexical element not found: <identifier> (0) (SQLExecDirect)"
+- code: DIALECT_UNSUPPORTED
+  phase: execute
+  sqlstate: "37000"
+  source: SPEC.md §5.2, citing https://communityhub.sage.com/us/sage100/f/technical-and-installation-discussions/75411/custom-queries-from-my-application (a bare INNER JOIN)
+  message: "[37000] [ProvideX][ODBC Driver]Unexpected extra token: INNER (1017) (SQLExecDirect)"
+- code: DIALECT_UNSUPPORTED
+  phase: execute
+  sqlstate: S1000
+  source: https://www.tek-tips.com/threads/mas200-odbc-connection-problem.1001713
+  message: "[S1000] [ProvideX][ODBC Driver]unexpected token encountered (0) (SQLExecDirect)"

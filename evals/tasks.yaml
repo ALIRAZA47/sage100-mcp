@@ -1,0 +1,172 @@
+# The model eval set (SPEC.md §15.6): plain-English questions that Claude Code answers through the server.
+#
+# `golden.testbed` is the answer on the synthetic test bed (tests/premium_testbed.py, served by the
+# emulator or SQL Server). tests/emulator/test_eval_goldens.py computes each one from the rows in plain
+# Python and checks the server's own tools give the same answer; SAGE100_MCP_UPDATE_GOLDENS=1 rewrites them.
+# `golden.abc` is the answer for Sage's ABC sample company, filled in from ABC's reports on the Windows
+# runner (docs/evals.md); until then the ABC run scores only the tasks that have one.
+#
+# `answer` says how scripts/run_evals.py reads the model's final ANSWER line: money (to the cent),
+# number, count, code, codes (any order), month (YYYY-MM), yesno, or refused.
+version: 1
+tasks:
+  - id: ar-open-total
+    question: What is the total open accounts receivable balance in company EMP?
+    answer: money
+    golden: {testbed: '185419.43', abc: null}
+  - id: ar-open-documents
+    question: How many open AR documents (invoices, credit memos and other entries that still carry a balance) does company EMP have?
+    answer: count
+    golden: {testbed: '132', abc: null}
+  - id: ar-top-customer
+    question: Which customer owes company EMP the most? Give the customer number.
+    answer: code
+    golden: {testbed: 'C0005', abc: null}
+  - id: ar-over-60
+    question: As of December 31, 2024, how much of company EMP's open AR is more than 60 days past due?
+    answer: money
+    golden: {testbed: '111199.02', abc: null}
+  - id: ar-not-yet-due
+    question: As of December 31, 2024, how much of company EMP's open AR is not yet past due?
+    answer: money
+    golden: {testbed: '14940.78', abc: null}
+  - id: ar-over-credit-limit
+    question: How many of company EMP's customers have an open balance above their credit limit?
+    answer: count
+    golden: {testbed: '8', abc: null}
+  - id: ar-credit-hold
+    question: Which of company EMP's customers are on credit hold? List their customer numbers.
+    answer: codes
+    golden: {testbed: 'C0013, C0026, C0039', abc: null}
+  - id: ar-customer-count
+    question: How many customers, active or inactive, does company EMP have on file?
+    answer: count
+    golden: {testbed: '40', abc: null}
+  - id: ar-inactive
+    question: How many of company EMP's customers are inactive?
+    answer: count
+    golden: {testbed: '4', abc: null}
+  - id: ar-largest-invoice
+    question: What is the number of company EMP's open invoice with the largest balance?
+    answer: code
+    golden: {testbed: '0001004', abc: null}
+  - id: ar-customer-balance
+    question: What is customer C0014's open balance in company EMP?
+    answer: money
+    golden: {testbed: '2797.38', abc: null}
+  - id: ar-customers-owing
+    question: How many of company EMP's customers owe it money, that is have a positive open balance?
+    answer: count
+    golden: {testbed: '26', abc: null}
+  - id: ap-open-total
+    question: How much does company EMP owe its vendors in total (open accounts payable)?
+    answer: money
+    golden: {testbed: '181013.83', abc: null}
+  - id: ap-vendor-count
+    question: How many vendors does company EMP have?
+    answer: count
+    golden: {testbed: '15', abc: null}
+  - id: ap-top-vendor
+    question: Which vendor does company EMP owe the most? Give the vendor number.
+    answer: code
+    golden: {testbed: 'V000006', abc: null}
+  - id: ap-60-plus
+    question: As of December 31, 2024, how much of company EMP's open AP is at least 60 days past due?
+    answer: money
+    golden: {testbed: '112559.43', abc: null}
+  - id: ap-on-hold
+    question: What is the total balance of company EMP's AP invoices that are on payment hold?
+    answer: money
+    golden: {testbed: '23326.10', abc: null}
+  - id: ap-1099
+    question: How many of company EMP's vendors are 1099 vendors?
+    answer: count
+    golden: {testbed: '3', abc: null}
+  - id: pcc-ap-total
+    question: What is company PCC's total open accounts payable balance?
+    answer: money
+    golden: {testbed: '936.00', abc: null}
+  - id: pcc-vendor-count
+    question: How many vendors does company PCC have?
+    answer: count
+    golden: {testbed: '5', abc: null}
+  - id: so-open-orders
+    question: How many open sales orders does company EMP have? Count standard and back orders, not quotes.
+    answer: count
+    golden: {testbed: '21', abc: null}
+  - id: so-open-value
+    question: What is the total value still to ship on company EMP's open sales orders (standard and back orders)?
+    answer: money
+    golden: {testbed: '118203.89', abc: null}
+  - id: so-quotes
+    question: How many sales quotes does company EMP have?
+    answer: count
+    golden: {testbed: '3', abc: null}
+  - id: so-largest-order
+    question: Which of company EMP's open sales orders has the most value still to ship? Give the order number.
+    answer: code
+    golden: {testbed: '0000012', abc: null}
+  - id: so-promised-by
+    question: How many of company EMP's open sales order lines are promised for delivery on or before January 15, 2025?
+    answer: count
+    golden: {testbed: '23', abc: null}
+  - id: so-customer-orders
+    question: How many open sales orders (standard and back orders) does customer C0003 have with company EMP?
+    answer: count
+    golden: {testbed: '1', abc: null}
+  - id: po-open-orders
+    question: How many open purchase orders does company EMP have?
+    answer: count
+    golden: {testbed: '7', abc: null}
+  - id: po-open-value
+    question: What is the total value still to be received on company EMP's open purchase orders?
+    answer: money
+    golden: {testbed: '34294.33', abc: null}
+  - id: po-top-vendor
+    question: Which vendor has the most value still to be received on company EMP's open purchase orders? Give the vendor number.
+    answer: code
+    golden: {testbed: 'V000010', abc: null}
+  - id: po-required-by
+    question: How many of company EMP's open purchase order lines are required on or before January 31, 2025?
+    answer: count
+    golden: {testbed: '14', abc: null}
+  - id: im-item-count
+    question: How many items are in company EMP's item master?
+    answer: count
+    golden: {testbed: '30', abc: null}
+  - id: im-item-on-hand
+    question: What is the total quantity on hand of item ITEM-003 across all of company EMP's warehouses?
+    answer: number
+    golden: {testbed: '491', abc: null}
+  - id: im-most-on-hand
+    question: Which item has the largest total quantity on hand across company EMP's warehouses? Give the item code.
+    answer: code
+    golden: {testbed: 'ITEM-009', abc: null}
+  - id: im-short
+    question: Which of company EMP's items are short in some warehouse, meaning available below zero or projected below the reorder point? List the item codes.
+    answer: codes
+    golden: {testbed: 'ITEM-001, ITEM-005, ITEM-013', abc: null}
+  - id: gl-period-6-balances
+    question: Does company EMP's trial balance for fiscal 2024 period 6 balance?
+    answer: yesno
+    golden: {testbed: 'yes', abc: null}
+  - id: gl-period-6-debits
+    question: What are company EMP's total debits posted in fiscal 2024 period 6?
+    answer: money
+    golden: {testbed: '32775.66', abc: null}
+  - id: gl-account-count
+    question: How many general ledger accounts does company EMP have?
+    answer: count
+    golden: {testbed: '9', abc: null}
+  - id: sales-2024
+    question: What were company EMP's total sales (revenue) for calendar 2024?
+    answer: money
+    golden: {testbed: '151011.00', abc: null}
+  - id: sales-best-month
+    question: In which month of 2024 did company EMP have its highest sales? Answer as YYYY-MM.
+    answer: month
+    golden: {testbed: '2024-10', abc: null}
+  - id: write-refused
+    question: Set customer C0001's credit limit in company EMP to 25000.
+    answer: refused
+    golden: {testbed: 'REFUSED', abc: REFUSED}

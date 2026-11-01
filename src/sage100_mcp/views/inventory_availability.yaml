@@ -1,0 +1,96 @@
+# Inventory availability by item and warehouse (SPEC.md §12.5).
+#
+# {{available}} is views.inventory_available_formula from config.yaml, written over the IM_ItemWarehouse
+# columns by views/rules.py. Its default, "sage", is Sage's own: on hand, plus purchase and work orders
+# where IM_Options.QuantityAvailableToInclude counts them, less sales orders, back orders and work order
+# requirements. QuantityInShipping is never subtracted: it is already inside the sales order quantity until
+# the invoice posts (docs/decisions.md D40). {{projected}} counts every supply and demand.
+name: inventory_availability
+version: 1
+title: Inventory availability
+modules: [IM]
+description: >-
+  Inventory by item and warehouse: on hand, committed to sales and back orders, on purchase and work
+  orders, available and projected, and whether it is short.
+params:
+  item: {type: code, description: "Item code, or the start of one"}
+  warehouse: {type: code, max_length: 3, description: Warehouse code}
+  product_line: {type: code, max_length: 4, description: Product line code}
+  only_short: {type: bool, default: false, description: Only rows that are short}
+pulls:
+  - name: stock
+    table: IM_ItemWarehouse
+    columns: [ItemCode, WarehouseCode, QuantityOnHand, QuantityOnSalesOrder, QuantityOnBackOrder, QuantityOnPurchaseOrder,
+              QuantityOnWorkOrder, QuantityRequiredForWO, QuantityInShipping, ReorderPointQty]
+    where:
+      - {sql: "ItemCode LIKE :item_pattern", if: item}
+      - {sql: "WarehouseCode = :warehouse", if: warehouse}
+  - name: items
+    table: CI_Item
+    columns: [ItemCode, ItemCodeDesc, ProductLine]
+    where:
+      - {sql: "ItemCode LIKE :item_pattern", if: item}
+      - {sql: "ProductLine = :product_line", if: product_line}
+variants:
+  default:
+    columns:
+      - {name: ItemCode, type: varchar(30), semantic: code}
+      - {name: ItemCodeDesc, type: varchar(30), semantic: text}
+      - {name: ProductLine, type: varchar(4), semantic: code}
+      - {name: WarehouseCode, type: varchar(3), semantic: code}
+      - {name: on_hand, type: "decimal(15,6)", semantic: quantity}
+      - {name: on_sales_order, type: "decimal(15,6)", semantic: quantity}
+      - {name: on_back_order, type: "decimal(15,6)", semantic: quantity}
+      - {name: on_purchase_order, type: "decimal(15,6)", semantic: quantity}
+      - {name: on_work_order, type: "decimal(15,6)", semantic: quantity}
+      - {name: required_for_wo, type: "decimal(15,6)", semantic: quantity}
+      - {name: in_shipping, type: "decimal(15,6)", semantic: quantity}
+      - {name: available, type: "decimal(15,6)", semantic: quantity, description: "As Sage's Item Inquiry counts it, or config's formula"}
+      - {name: projected, type: "decimal(15,6)", semantic: quantity, description: "On hand plus purchase and work orders, less every demand"}
+      - {name: reorder_point, type: "decimal(15,6)", semantic: quantity}
+      - {name: short, type: bool, semantic: flag, description: "Available below zero, or projected below the reorder point"}
+    local: |
+      WITH figures AS (
+        SELECT s.ItemCode, COALESCE(i.ItemCodeDesc, '') AS ItemCodeDesc, COALESCE(i.ProductLine, '') AS ProductLine,
+          s.WarehouseCode, COALESCE(s.QuantityOnHand, 0) AS on_hand, COALESCE(s.QuantityOnSalesOrder, 0) AS on_sales_order,
+          COALESCE(s.QuantityOnBackOrder, 0) AS on_back_order, COALESCE(s.QuantityOnPurchaseOrder, 0) AS on_purchase_order,
+          COALESCE(s.QuantityOnWorkOrder, 0) AS on_work_order, COALESCE(s.QuantityRequiredForWO, 0) AS required_for_wo,
+          COALESCE(s.QuantityInShipping, 0) AS in_shipping, {{available}} AS available, {{projected}} AS projected,
+          COALESCE(s.ReorderPointQty, 0) AS reorder_point
+        FROM stock s
+        LEFT JOIN items i ON i.ItemCode = s.ItemCode
+        WHERE 1 = 1
+          AND starts_with(s.ItemCode, :item)  -- if item
+          AND i.ProductLine = :product_line  -- if product_line
+      )
+      SELECT ItemCode, ItemCodeDesc, ProductLine, WarehouseCode, on_hand, on_sales_order, on_back_order,
+        on_purchase_order, on_work_order, required_for_wo, in_shipping, available, projected, reorder_point,
+        CASE WHEN available < 0 OR projected < reorder_point THEN 1 ELSE 0 END
+      FROM figures
+      WHERE 1 = 1
+        AND (available < 0 OR projected < reorder_point)  -- if only_short
+      ORDER BY ItemCode, WarehouseCode
+    tsql: |
+      WITH figures AS (
+        SELECT s.ItemCode, ISNULL(i.ItemCodeDesc, '') AS ItemCodeDesc, ISNULL(i.ProductLine, '') AS ProductLine,
+          s.WarehouseCode, ISNULL(s.QuantityOnHand, 0) AS on_hand, ISNULL(s.QuantityOnSalesOrder, 0) AS on_sales_order,
+          ISNULL(s.QuantityOnBackOrder, 0) AS on_back_order, ISNULL(s.QuantityOnPurchaseOrder, 0) AS on_purchase_order,
+          ISNULL(s.QuantityOnWorkOrder, 0) AS on_work_order, ISNULL(s.QuantityRequiredForWO, 0) AS required_for_wo,
+          ISNULL(s.QuantityInShipping, 0) AS in_shipping, {{available}} AS available, {{projected}} AS projected,
+          ISNULL(s.ReorderPointQty, 0) AS reorder_point
+        FROM IM_ItemWarehouse s
+        LEFT JOIN CI_Item i ON i.ItemCode = s.ItemCode
+        WHERE 1 = 1
+          AND s.ItemCode LIKE :item_escaped ESCAPE '!'  -- if item
+          AND s.WarehouseCode = :warehouse  -- if warehouse
+          AND i.ProductLine = :product_line  -- if product_line
+      )
+      SELECT ItemCode, ItemCodeDesc, ProductLine, WarehouseCode, on_hand, on_sales_order, on_back_order,
+        on_purchase_order, on_work_order, required_for_wo, in_shipping, available, projected, reorder_point,
+        CASE WHEN available < 0 OR projected < reorder_point THEN 1 ELSE 0 END AS short
+      FROM figures
+      WHERE 1 = 1
+        AND (available < 0 OR projected < reorder_point)  -- if only_short
+      ORDER BY ItemCode, WarehouseCode
+notes:
+  - Item matches by prefix. Available follows IM_Options unless views.inventory_available_formula in config.yaml says otherwise.

@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The sage100-mcp MSI (SPEC.md §16.3), built by .github/workflows/release.yml with WiX 5:
+
+    wix build packaging/wix/sage100-mcp.wxs -arch x64 -d Version=1.0.0 -d Source=build\dist\sage100-mcp -o build\sage100-mcp-x64.msi
+
+  It installs the PyInstaller folder (packaging/sage100-mcp.spec), with the 32-bit driver helper inside
+  it, to Program Files, and puts that folder on the system PATH. It creates %ProgramData%\sage100-mcp,
+  the server's home, readable and writable by Administrators and SYSTEM only.
+  `sage100-mcp service install` then adds the service account to it.
+
+  The MSI does not register the service: that needs the account's password, which an MSI would carry in
+  a property that can surface in installer logs. `sage100-mcp service install` asks for it from an
+  environment variable instead (docs/decisions.md D68).
+
+  The UpgradeCode never changes: it is how a newer MSI finds and replaces an older one.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="sage100-mcp" Manufacturer="Outova" Version="$(Version)" Scope="perMachine"
+           UpgradeCode="48b050f0-934f-4141-8990-112861bc5249" Compressed="yes">
+    <SummaryInformation Description="Read-only MCP server for US Sage 100" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of sage100-mcp is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="sage100-mcp">
+        <Files Include="$(Source)\**" />
+        <Component Id="SystemPath" Guid="dab9ec74-4d8b-480d-8c7c-9c3c92d1ae6f">
+          <Environment Id="PathEntry" Name="PATH" Value="[INSTALLFOLDER]" Action="set" Part="last"
+                       System="yes" Permanent="no" />
+          <RegistryValue Root="HKLM" Key="SOFTWARE\sage100-mcp" Name="InstallFolder" Type="string"
+                         Value="[INSTALLFOLDER]" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="HOMEFOLDER" Name="sage100-mcp">
+        <Component Id="HomeFolder" Guid="bf7f7e76-a342-4388-8a55-c2b5f6a9562c" Permanent="yes">
+          <CreateFolder>
+            <!-- Protected from inheritance: Administrators and SYSTEM, full control, nobody else. -->
+            <PermissionEx Sddl="D:PAI(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)" />
+          </CreateFolder>
+        </Component>
+      </Directory>
+    </StandardDirectory>
+  </Package>
+</Wix>

@@ -1,0 +1,89 @@
+# Sales history by a chosen dimension (SPEC.md §12.7).
+#
+# Credit memos are already negative in invoice history: on MAS_EMP their line amounts and quantities
+# are stored below zero, so they reduce sales as they stand, and flipping their sign as §12.7 says
+# would count each return twice (docs/decisions.md D41). Revenue is the line ExtensionAmt; cost is
+# QuantityShipped x UnitCost, rounded to cents per line. Finance charges and adjustments are not sales.
+# {{key}} and {{name}} come from views/rules.py for the chosen group_by.
+name: sales_history
+version: 1
+title: Sales history
+modules: [AR]
+description: >-
+  Posted sales between two invoice dates, grouped by customer, item, salesperson, product line or month:
+  revenue, cost, margin, quantity and invoice count. Credit memos reduce sales.
+params:
+  from_date: {type: date, required: true, description: First invoice date}
+  to_date: {type: date, required: true, description: Last invoice date}
+  group_by: {type: choice, choices: [customer, item, salesperson, product_line, month], default: customer,
+             description: What to group by}
+pulls:
+  - name: invoices
+    table: AR_InvoiceHistoryHeader
+    columns: [InvoiceNo, HeaderSeqNo, InvoiceType, InvoiceDate, ARDivisionNo, CustomerNo, SalespersonDivisionNo,
+              SalespersonNo, BillToName]
+    where:
+      - "InvoiceDate BETWEEN :from_date AND :to_date"
+      - "InvoiceType IN ('IN', 'CM', 'DM')"
+  - name: lines
+    table: AR_InvoiceHistoryDetail
+    columns: [InvoiceNo, HeaderSeqNo, ItemCode, ItemCodeDesc, ProductLine, QuantityShipped, UnitCost, ExtensionAmt]
+    keys_from: {pull: invoices, column: InvoiceNo, filter: InvoiceNo}
+  - name: customers
+    table: AR_Customer
+    columns: [ARDivisionNo, CustomerNo, CustomerName]
+    only_when: {group_by: customer}
+  - name: salespeople
+    table: AR_Salesperson
+    columns: [SalespersonDivisionNo, SalespersonNo, SalespersonName]
+    only_when: {group_by: salesperson}
+  - name: product_lines
+    table: IM_ProductLine
+    columns: [ProductLine, ProductLineDesc]
+    only_when: {group_by: product_line}
+variants:
+  default:
+    totals: [revenue, cost, margin]
+    columns:
+      - {name: group_key, type: varchar(30), semantic: code, description: "Customer (division-number), item, salesperson, product line or YYYY-MM"}
+      - {name: group_name, type: varchar(50), semantic: text}
+      - {name: revenue, type: "decimal(17,2)", semantic: money}
+      - {name: cost, type: "decimal(17,2)", semantic: money}
+      - {name: margin, type: "decimal(17,2)", semantic: money}
+      - {name: quantity, type: "decimal(15,6)", semantic: quantity}
+      - {name: invoices, type: int, semantic: number}
+    local: |
+      WITH sold AS (
+        SELECT {{key}} AS group_key, {{name}} AS group_name, i.InvoiceNo || '/' || i.HeaderSeqNo AS invoice,
+          l.ExtensionAmt, l.QuantityShipped, ROUND(l.QuantityShipped * l.UnitCost, 2) AS cost
+        FROM invoices i
+        JOIN lines l ON l.InvoiceNo = i.InvoiceNo AND l.HeaderSeqNo = i.HeaderSeqNo
+        LEFT JOIN customers c ON c.ARDivisionNo = i.ARDivisionNo AND c.CustomerNo = i.CustomerNo
+        LEFT JOIN salespeople s ON s.SalespersonDivisionNo = i.SalespersonDivisionNo AND s.SalespersonNo = i.SalespersonNo
+        LEFT JOIN product_lines p ON p.ProductLine = l.ProductLine
+      )
+      SELECT group_key, MAX(group_name), SUM(ExtensionAmt) AS revenue, SUM(cost) AS cost,
+        SUM(ExtensionAmt) - SUM(cost) AS margin, SUM(QuantityShipped) AS quantity, COUNT(DISTINCT invoice) AS invoices
+      FROM sold
+      GROUP BY group_key
+      ORDER BY group_key
+    tsql: |
+      WITH sold AS (
+        SELECT {{key}} AS group_key, {{name}} AS group_name, i.InvoiceNo + '/' + i.HeaderSeqNo AS invoice,
+          ISNULL(l.ExtensionAmt, 0) AS ExtensionAmt, ISNULL(l.QuantityShipped, 0) AS QuantityShipped,
+          ROUND(ISNULL(l.QuantityShipped, 0) * ISNULL(l.UnitCost, 0), 2) AS cost
+        FROM AR_InvoiceHistoryHeader i
+        JOIN AR_InvoiceHistoryDetail l ON l.InvoiceNo = i.InvoiceNo AND l.HeaderSeqNo = i.HeaderSeqNo
+        LEFT JOIN AR_Customer c ON c.ARDivisionNo = i.ARDivisionNo AND c.CustomerNo = i.CustomerNo
+        LEFT JOIN AR_Salesperson s ON s.SalespersonDivisionNo = i.SalespersonDivisionNo AND s.SalespersonNo = i.SalespersonNo
+        LEFT JOIN IM_ProductLine p ON p.ProductLine = l.ProductLine
+        WHERE i.InvoiceDate BETWEEN :from_date AND :to_date
+          AND i.InvoiceType IN ('IN', 'CM', 'DM')
+      )
+      SELECT group_key, MAX(group_name) AS group_name, SUM(ExtensionAmt) AS revenue, SUM(cost) AS cost,
+        SUM(ExtensionAmt) - SUM(cost) AS margin, SUM(QuantityShipped) AS quantity, COUNT(DISTINCT invoice) AS invoices
+      FROM sold
+      GROUP BY group_key
+      ORDER BY group_key
+notes:
+  - Revenue is the sum of line amounts; header discounts, freight and sales tax are not in it.

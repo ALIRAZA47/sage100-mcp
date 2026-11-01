@@ -1,0 +1,87 @@
+[project]
+name = "sage100-mcp"
+version = "1.0.0rc1"
+description = "Read-only, Sage-aware MCP server for US Sage 100 (ProvideX ODBC and Premium SQL Server)"
+readme = "README.md"
+requires-python = ">=3.12"
+keywords = ["mcp", "model context protocol", "sage 100", "providex", "odbc", "accounting", "erp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Accounting",
+]
+# SPEC.md §10.1 pins the SDK exactly. The other runtime pins (pyodbc, sqlglot, duckdb,
+# keyring) are added in the milestone that first imports them; see docs/decisions.md.
+dependencies = [
+    "cryptography>=45",
+    "duckdb>=1.4,<3",
+    "keyring>=25.7",
+    "mcp==2.3.0",
+    "pydantic>=2.12,<3",
+    "pyjwt[crypto]>=2.10,<3",
+    "pyodbc>=5.3,<6",
+    "pywin32>=311; sys_platform == 'win32'",
+    "pyyaml>=6.0.2",
+    "sqlglot==30.25.0",
+    "starlette>=1.10,<2",
+    "uvicorn>=0.54,<1",
+]
+
+[project.scripts]
+sage100-mcp = "sage100_mcp.cli:main"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16",
+    "hypothesis>=6.140",
+    "jsonschema>=4.26",
+    "mypy>=2.4",
+    "pytest>=9.0",
+    "ruff>=0.17",
+    "types-jsonschema>=4.25",
+    "types-pywin32>=311",
+    "types-pyyaml>=6.0.12",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv]
+# Fail the lock, rather than CI, if a dependency has no wheel for a supported host.
+# 32-bit Windows is deliberately absent: see docs/decisions.md (D3).
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+markers = [
+    "windows: needs a Windows host with the Sage 100 ODBC driver (self-hosted runner only)",
+    "contract: MCP contract tests (SPEC.md §15.5)",
+    "premium: needs a SQL Server for the Premium test bed (SAGE100_MCP_TEST_SQLSERVER, SAGE100_MCP_TEST_SA_PASSWORD)",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "PT", "RUF"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["pyodbc"]  # ships pyodbc.pyi without py.typed, so mypy does not read it
+ignore_missing_imports = true
