@@ -59,7 +59,17 @@ VM, which this environment lacks. D74 says what was measured instead and what st
   - The frozen helper, built from the spec on Linux, served the same queries. The frozen server ran its
     bundled `helper.py` through a configured Python.
   - CI's `helper32` job has the 64-bit server read Windows' 32-bit-only Jet text driver through a
-    32-bit Python (`scripts/helper_smoke.py`). It hasn't run yet.
+    32-bit Python (`scripts/helper_smoke.py`).
+- **Found by the first run on Windows.** pyodbc sets `SQL_ATTR_CONNECTION_TIMEOUT` as soon as
+  `connection.timeout` is assigned, even to 0. Jet's text driver refuses that attribute (HYC00), and
+  the helper had been assigning the timeout before every cursor.
+  - The bridge now forwards an assignment when the server makes it, as its own request (protocol 2), so a
+    refusal arrives where it would in-process.
+  - The ProvideX probe had the same flaw: it assigned 0 before each check. Sage's driver already refuses
+    the login timeout (§14.2), so it may refuse this attribute too. The probe now clears a timeout only
+    when one is set, and reads a refusal at assignment as `query_timeout` unsupported.
+  - The emulator models the attribute (`accepts_connection_timeout`), and the probe is tested with it
+    refused, directly and through the helper.
 - **Cost.** About 3 µs a row, measured on 50,000 four-column rows over SQL Server: 0.10 s directly,
   0.25 s through the helper. A 250,000-row hybrid snapshot pays about 0.75 s. ProvideX reading over a
   share is far slower than that.

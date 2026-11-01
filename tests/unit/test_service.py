@@ -120,7 +120,10 @@ def test_the_service_log_redacts_secrets(tmp_path: Path) -> None:
     assert "hunter2" not in text
 
 
-def test_off_windows_the_command_points_to_serve(capsys: pytest.CaptureFixture[str]) -> None:
+def test_off_windows_the_command_points_to_serve(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("sys.platform", "linux")  # on Windows, never reach the real service manager
     assert main(["service", "install", "--account", "LocalSystem"]) == EXIT_USAGE
     assert "sage100-mcp serve" in capsys.readouterr().err
     assert main(["service", "run"]) == 2

@@ -257,6 +257,18 @@ def summary(outcomes: list[Outcome], skipped: list[str]) -> dict[str, Any]:
     }
 
 
+def split_command(text: str, *, windows: bool = os.name == "nt") -> list[str]:
+    """--claude as its words, the way the user's shell would split them.
+
+    Windows paths keep their backslashes, so POSIX quoting can't apply there. shlex's other mode keeps the quotes
+    around a quoted path, and CreateProcess can't find a program whose name starts with a quote, so they go.
+    """
+    if not windows:
+        return shlex.split(text)
+    words = shlex.split(text, posix=False)
+    return [word[1:-1] if len(word) >= 2 and word[0] == word[-1] and word[0] in "\"'" else word for word in words]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--golden", default="testbed", help="which golden answers to score against: testbed or abc")
@@ -294,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
                     run_task,
                     task,
                     golden,
-                    claude=shlex.split(args.claude, posix=os.name != "nt"),
+                    claude=split_command(args.claude),
                     config=config,
                     model=args.model,
                     max_turns=args.max_turns,

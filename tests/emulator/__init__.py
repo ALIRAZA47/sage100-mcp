@@ -115,6 +115,7 @@ class Install:
     cs_available: bool = True  # the PVXIOSVR service answers
     honors_timeout: bool = True  # with query_timeout accepted, the driver also enforces it
     honors_cancel: bool = True  # SQLCancel interrupts a running statement
+    accepts_connection_timeout: bool = True  # SQL_ATTR_CONNECTION_TIMEOUT, which pyodbc sets on assignment
     slow_tables: dict[str, float] = field(default_factory=dict)  # table -> seconds an execute takes
     bad_dates: set[tuple[str, str]] = field(default_factory=set)  # (company, table) holding an invalid date
     connections: int = 0  # opened so far
@@ -317,14 +318,25 @@ class Connection:
         self.install = emulated
         self.company = company
         self.keywords = keywords
-        self.timeout = 0  # pyodbc: SQL_ATTR_QUERY_TIMEOUT for each new cursor
+        self._timeout = 0
         self.autocommit = True
         self.closed = False
+
+    @property
+    def timeout(self) -> int:
+        return self._timeout
+
+    @timeout.setter
+    def timeout(self, seconds: int) -> None:
+        """As in pyodbc: SQL_ATTR_CONNECTION_TIMEOUT at once, even for 0, and the query timeout per new cursor."""
+        if not self.install.accepts_connection_timeout:
+            raise not_capable("SQLSetConnectAttr")
+        self._timeout = int(seconds)
 
     def cursor(self) -> Cursor:
         if self.closed:
             raise _error(ProgrammingError, "08003", "Attempt to use a closed connection.")
-        if self.timeout and not self.install.profile.supports("query_timeout"):
+        if self._timeout and not self.install.profile.supports("query_timeout"):
             raise not_capable("SQLSetStmtAttr")
         return Cursor(self)
 

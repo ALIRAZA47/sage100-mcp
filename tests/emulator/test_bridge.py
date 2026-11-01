@@ -22,6 +22,7 @@ import pytest
 from mcp import Client
 
 from sage100_mcp.bridge.client import Bridge, HelperFailure, InterfaceError, ProgrammingError
+from sage100_mcp.bridge.helper import PROTOCOL
 from sage100_mcp.capabilities import cache_path
 from sage100_mcp.errors import ErrorCode, SageError
 from sage100_mcp.runtime import Runtime
@@ -124,6 +125,32 @@ def test_driver_errors_keep_their_class_and_arguments(make_install: Installer, b
         connect(bridge, install).cursor().execute(sql)  # a bare JOIN, which the driver's grammar lacks
     assert refusal.value.args == direct_refusal.value.args
     assert refusal.value.args[0] == "37000"
+
+
+def test_assigning_the_timeout_fails_as_in_pyodbc(make_install: Installer, bridge: Bridge) -> None:
+    """pyodbc calls SQLSetConnectAttr when connection.timeout is assigned, so a refusal arrives there."""
+    install = make_install(accepts_connection_timeout=False)
+    direct, helped = connect(emulator, install), connect(bridge, install)
+    with pytest.raises(emulator.Error) as refused_directly:
+        direct.timeout = 0
+    with pytest.raises(bridge.Error) as refused:
+        helped.timeout = 0
+    assert refused.value.args == refused_directly.value.args
+    assert helped.timeout == 0  # unchanged, as pyodbc leaves it
+    cursor = helped.cursor()  # a cursor never assigns the timeout itself
+    cursor.execute("SELECT ModuleCode FROM AR_Options")
+    assert cursor.fetchone() is not None
+
+
+def test_the_timeout_reaches_new_cursors(make_install: Installer, bridge: Bridge) -> None:
+    install = make_install(slow_tables={"AR_Customer": 3.0})
+    connection = connect(bridge, install)
+    connection.timeout = 1
+    started = time.monotonic()
+    with pytest.raises(bridge.Error) as timed_out:
+        connection.cursor().execute("SELECT CustomerNo FROM AR_Customer")
+    assert timed_out.value.args[0] == "HYT00"
+    assert time.monotonic() - started < 2.5
 
 
 def test_a_value_without_a_wire_form_is_refused_here(make_install: Installer, bridge: Bridge) -> None:
@@ -424,7 +451,7 @@ def test_a_helper_of_another_protocol_is_refused(make_install: Installer, make_e
         "{{'protocol': 99}}}})); sys.stdout.buffer.flush(); read_message(sys.stdin.buffer)"
     ).format(src=str(REPO / "src"))
     executor = make_executor(make_install(), odbc=Bridge((sys.executable, "-c", script)))
-    with pytest.raises(SageError, match="speaks protocol 99 and this server speaks 1"):
+    with pytest.raises(SageError, match=f"speaks protocol 99 and this server speaks {PROTOCOL}"):
         executor.discover()
 
 

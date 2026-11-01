@@ -108,3 +108,17 @@ def test_probe_tables_are_small_ones_first() -> None:
         "GL_Account",
         "CI_Item",
     ]
+
+
+def test_a_driver_that_refuses_the_connection_timeout(make_install: Installer, make_executor: Maker) -> None:
+    """pyodbc sets SQL_ATTR_CONNECTION_TIMEOUT as soon as connection.timeout is assigned, even to 0. A driver
+    without it refuses with HYC00, as Microsoft's 32-bit text driver did in CI. The probe must not assign the
+    timeout needlessly, and must record query_timeout as unsupported rather than fail."""
+    install = make_install("pxplus_full", accepts_connection_timeout=False)
+    executor = make_executor(install)
+    result = executor.query("EMP", "SELECT CustomerNo FROM AR_Customer", max_rows=5, timeout_s=10)
+    assert result.rows
+    assert executor.capabilities_origin == "probed"
+    assert not executor.capabilities.supports("query_timeout")
+    assert "Driver not capable" in executor.capabilities.notes["query_timeout"]
+    assert executor.capabilities.supports("or")  # the rest of the probe ran as usual

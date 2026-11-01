@@ -58,7 +58,7 @@ class AuditLog:
         try:
             with self._lock:
                 self.directory.mkdir(parents=True, exist_ok=True)
-                with self.path_for(now.date()).open("a", encoding="utf-8") as handle:
+                with self.path_for(now.date()).open("a", encoding="utf-8", newline="\n") as handle:  # LF everywhere
                     handle.write(text + "\n")
                 if self._pruned != now.date():
                     self._pruned = now.date()
