@@ -1,0 +1,32 @@
+name: Feature request
+description: A question the server can't answer yet, or something it should do differently.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The server stays read-only, whatever is asked of it: requests to write to Sage will be closed.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The question or task
+      description: What you wanted Claude to answer or do with your Sage data, in plain words.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help
+      description: For example a new canned view, a setting, a tool, or a change to an answer's shape.
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend
+      multiple: true
+      options:
+        - ProvideX (Standard or Advanced)
+        - Premium (SQL Server)
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead

@@ -1,0 +1,52 @@
+name: Bug report
+description: Something sage100-mcp does wrong, or an error it shouldn't give.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste company data, passwords, tokens, or connection strings here: issues are public.
+        Doctor's output and the server's error codes are safe to share. Security problems go to a private
+        report instead (SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `sage100-mcp --version`.
+      placeholder: sage100-mcp 1.0.0rc1
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend
+      options:
+        - Sage 100 Standard or Advanced (ProvideX), 64-bit driver
+        - Sage 100 Standard or Advanced (ProvideX), 32-bit driver through the helper
+        - Sage 100 Advanced, Client/Server ODBC
+        - Sage 100 Premium (SQL Server)
+    validations:
+      required: true
+  - type: input
+    id: sage
+    attributes:
+      label: Sage 100 version and the host's operating system
+      placeholder: Sage 100 2025.1 on Windows Server 2022
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: The question or tool call, what came back (error code, message and hint), and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: sage100-mcp doctor
+      description: Its output. It prints no passwords or tokens, but check for anything you'd rather not share.
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: The redacted `detail` of an error, the SQL from explain_query, or the steps to reproduce it.

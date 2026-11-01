@@ -1,0 +1,28 @@
+{
+  "release": {
+    "branches": [
+      "main"
+    ],
+    "tags": [
+      "v*"
+    ]
+  },
+  "pypi": {
+    "branches": [],
+    "tags": [
+      "v*"
+    ]
+  },
+  "registry": {
+    "branches": [],
+    "tags": [
+      "v*"
+    ]
+  },
+  "sage-runner": {
+    "branches": [
+      "main"
+    ],
+    "tags": []
+  }
+}

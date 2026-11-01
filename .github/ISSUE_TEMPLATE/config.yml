@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/ALIRAZA47/sage100-mcp/security/advisories/new
+    about: Privately, never in a public issue. SECURITY.md says what counts and what to include.
+  - name: Setting it up
+    url: https://github.com/ALIRAZA47/sage100-mcp/blob/main/docs/setup.md
+    about: The setup guide, with what doctor's failures mean and how to fix them.

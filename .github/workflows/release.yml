@@ -1,7 +1,8 @@
 name: release
 
 # The release artifacts (SPEC.md §16.3), built for a v* tag or by hand. Nothing is published unless the
-# repository says so (docs/decisions.md D73):
+# repository says so, and nothing is signed or published without the owner's approval (docs/decisions.md
+# D73, D75): the jobs that hold secrets run in the release, pypi and registry environments, which wait for it.
 # - python: the wheel and sdist, installed into a fresh environment that must answer sage_status.
 # - helper32: the 32-bit driver helper (packaging/odbc32.spec), built under 32-bit Python (D67).
 # - windows: the 64-bit server (packaging/sage100-mcp.spec), with the helper inside it as odbc32\, both
@@ -58,6 +59,7 @@ jobs:
     name: Windows x64 MSI
     needs: helper32
     runs-on: windows-latest
+    environment: release  # the signing secrets live here; a run waits for the owner's approval
     env:
       SIGNING: ${{ secrets.WINDOWS_SIGNING_CERT_PFX_BASE64 != '' }}
     steps:
@@ -174,6 +176,7 @@ jobs:
     if: vars.PUBLISH_REGISTRY == 'true' && startsWith(github.ref, 'refs/tags/v')
     needs: pypi
     runs-on: ubuntu-latest
+    environment: registry  # holds MCP_REGISTRY_PRIVATE_KEY; waits for the owner's approval
     steps:
       - uses: actions/checkout@v5
       - name: mcp-publisher (pin MCP_PUBLISHER_VERSION to a reviewed release)
