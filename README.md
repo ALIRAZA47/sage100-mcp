@@ -189,6 +189,9 @@ reviews: `ar_collections_review`, `order_backlog_review`, `month_end_checks` and
 
 ## Develop
 
+[CONTRIBUTING.md](CONTRIBUTING.md) has the rules every change keeps and how pull requests are reviewed.
+Report security problems privately, as [SECURITY.md](SECURITY.md) explains.
+
 ```bash
 uv sync
 uv run pytest -m "not windows"     # unit, ProvideX emulator, contract; Premium tests skip without a SQL Server

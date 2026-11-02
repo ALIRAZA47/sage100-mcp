@@ -126,9 +126,13 @@ jobs:
     # M3's: each view against ABC's report goldens in tests/reconciliation/abc (docs/reconciliation.md).
     # The 32-bit leg (Sage 2024's 32-bit driver) runs the same suite through the 32-bit helper: set
     # SAGE100_MCP_TEST_PROVIDEX_HELPER to a 32-bit python.exe with pyodbc (docs/decisions.md D67).
-    if: vars.SAGE_RUNNER == 'true'
+    # The runner holds Sage data, and this repository is public, so pull requests never run here. A push to
+    # main or a manual run waits for the owner's approval in the sage-runner environment, which holds the
+    # Sage login secrets (docs/decisions.md D75).
+    if: vars.SAGE_RUNNER == 'true' && github.event_name != 'pull_request'
     name: sage driver (self-hosted, x64)
     runs-on: [self-hosted, windows, sage100]
+    environment: sage-runner
     env:
       SAGE100_MCP_TEST_PROVIDEX_DIRECTORY: ${{ vars.SAGE_MAS90_DIRECTORY }}
       SAGE100_MCP_TEST_PROVIDEX_COMPANY: ABC

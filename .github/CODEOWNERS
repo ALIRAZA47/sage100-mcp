@@ -1,0 +1,3 @@
+# The maintainer owns every file. The main branch's ruleset requires a code owner's approval before
+# anything merges (.github/settings/ruleset-main.json; docs/decisions.md D75).
+* @ALIRAZA47

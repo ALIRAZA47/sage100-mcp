@@ -135,7 +135,8 @@ VM, which this environment lacks. D74 says what was measured instead and what st
   - the 64-bit one-folder server, with the helper copied in. Both are smoke-tested.
 - **Signing.** When the signing secrets exist (`WINDOWS_SIGNING_CERT_PFX_BASE64` and
   `_PASSWORD`), both programs and the MSI are signed with Authenticode and an RFC 3161 timestamp.
-  Without them the build is unsigned, and says nothing.
+  Without them the build is unsigned, and says nothing. The secrets are secrets of the `release`
+  environment, not of the repository (D75).
 - **The MSI** is built with WiX 5.0.2. WiX 6 and later need the Open Source Maintenance Fee EULA
   accepted. The runner installs the MSI, checks the program, the helper, the PATH and the home folder's
   ACL, and uninstalls it.
@@ -161,6 +162,48 @@ VM, which this environment lacks. D74 says what was measured instead and what st
   - the service on a real host (CI's service job);
   - the helper with the Jet text driver (CI's helper32 job);
   - the helper with Sage's own 32-bit driver (the Windows runner, a03).
+
+**D75. Nothing merges, signs, publishes or reaches the Sage runner without the owner (added after M6).**
+- **Why.** The repository is public and has one maintainer, who asked that nobody merge into `main`, or run
+  workflows, without them.
+- **Settings as code.** The rules live in `.github/settings/*.json`, and `scripts/github_settings.py`
+  applies them; `--check` reports drift. They need a repository admin's `gh` login.
+- **`main` (a ruleset).**
+  - A change comes in only through a pull request.
+  - The pull request needs one approval of its latest push from the code owner (`.github/CODEOWNERS`:
+    `@ALIRAZA47`). A later push dismisses the approval.
+  - Nobody force-pushes to `main` or deletes it.
+  - The admin role may bypass these rules only when merging a pull request. So nobody pushes to `main`
+    directly: not the owner, and not a Claude session acting with the owner's GitHub access.
+- **`v*` tags (a ruleset).** Only an admin creates, moves or deletes them, and they start a release.
+- **Actions.**
+  - Workflows may use GitHub's own actions plus `astral-sh/setup-uv` and `pypa/gh-action-pypi-publish`,
+    nothing else.
+  - The token is read-only unless a workflow asks for more, and workflows can't approve pull requests.
+  - Every pull request from a fork waits for the owner's approval before its workflows run.
+- **Environments.** Each has the owner as a required reviewer:
+  - `release`: `main` and `v*`;
+  - `pypi` and `registry`: `v*`;
+  - `sage-runner`: `main`.
+  The signing, publishing and Sage login secrets belong in these environments.
+  `tests/unit/test_repo_files.py` fails if a job reads a secret outside one. That test found CI's
+  self-hosted Sage job reading the Sage login with no gate.
+- **The self-hosted Sage runner never runs pull requests.** In a public repository, a fork's pull request
+  could otherwise run its code on the machine that reaches the Sage data.
+- **What only the absence of collaborators guarantees.**
+  - Anyone given write access can push branches, and start manual runs of workflows that use no secret.
+  - The environments still keep secrets from them, and `main` still needs the owner.
+  - To keep "nothing runs without me" literal, give nobody else write access.
+- **Applied from the session: nothing.**
+  - The session's GitHub access has admin rights, but its proxy refuses writes to rulesets, branch
+    protection, the Actions settings and environments.
+  - The owner applies them with `uv run python scripts/github_settings.py`, or in the repository's Settings.
+- **Community files.**
+  - `CONTRIBUTING.md` and `SECURITY.md`. Vulnerabilities are reported through GitHub's private
+    vulnerability reporting, which the script turns on.
+  - `CODE_OF_CONDUCT.md`, which adopts the Contributor Covenant 2.1 by reference.
+  - A pull request template that carries CLAUDE.md's checklist.
+  - Issue forms. Blank issues are off, and the forms link to the private security report.
 
 ## M5 — Hardening (Oct 31, 2026)
 
