@@ -87,9 +87,10 @@ def test_lines_go_to_a_file_per_utc_day_and_old_files_are_pruned(tmp_path: Path)
     (tmp_path / "audit").mkdir()
     old, kept = log.path_for(today - timedelta(days=91)), log.path_for(today - timedelta(days=90))
     for path in (old, kept, tmp_path / "audit" / "notes.jsonl"):
-        path.write_text("{}\n", encoding="utf-8")
+        path.write_text("{}\n", encoding="utf-8", newline="\n")
     log.record({"tool": "list_companies", "sql": ["SELECT 1 FROM AR_Customer WHERE CustomerNo = 'C1'"]})
     log.record({"tool": "list_tables"})
+    assert b"\r" not in log.path_for(today).read_bytes(), "JSON lines end in LF on every OS"
     lines = [json.loads(line) for line in log.path_for(today).read_text(encoding="utf-8").splitlines()]
     assert [line["tool"] for line in lines] == ["list_companies", "list_tables"]
     assert lines[0]["ts"].endswith("Z")

@@ -65,6 +65,7 @@ jobs:
         with:
           python-version: "3.12"
           architecture: x86
+          update-environment: false  # off PATH, so uv below takes a 64-bit Python for the server
       - run: '& "${{ steps.x86.outputs.python-path }}" -m pip install pyodbc==5.3.0'
       - uses: astral-sh/setup-uv@v7
         with:
@@ -95,12 +96,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Microsoft ODBC Driver 18 for SQL Server
+        # The runner image may already hold Microsoft's key and package list: gpg must not stop to ask
+        # before replacing the key, and the list keeps its usual name so apt never reads it twice.
         run: |
           if ! odbcinst -q -d -n "ODBC Driver 18 for SQL Server" > /dev/null 2>&1; then
-            curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
-              | sudo gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
-            curl -fsSL "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list" \
-              | sudo tee /etc/apt/sources.list.d/mssql-release.list
+            if [ ! -f /etc/apt/sources.list.d/microsoft-prod.list ]; then
+              curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+                | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+              curl -fsSL "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list" \
+                | sudo tee /etc/apt/sources.list.d/microsoft-prod.list
+            fi
             sudo apt-get update
             sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc
           fi

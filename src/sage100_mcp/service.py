@@ -143,6 +143,16 @@ def file_logging(home: Path, level: str) -> logging.Handler:
     return handler
 
 
+def stop_file_logging(handler: logging.Handler) -> None:
+    """Close the service's log before the service reports that it stopped.
+
+    The service's process can outlive its stop by a moment, and Windows can't delete or rotate a file that
+    another process holds open.
+    """
+    logging.getLogger().removeHandler(handler)
+    handler.close()
+
+
 def run_service(config: Path | None) -> int:  # pragma: no cover - runs only under the Windows service manager
     """``service run``: hand this process to the service control manager, which then calls SvcDoRun."""
     if sys.platform != "win32":
@@ -170,9 +180,10 @@ def run_service(config: Path | None) -> int:  # pragma: no cover - runs only und
                 host.stop()
 
         def SvcDoRun(self) -> None:  # pywin32's name
+            handler = None
             try:
                 loaded = load_config(config, must_exist=config is not None)
-                file_logging(default_home(), loaded.config.server.log_level)
+                handler = file_logging(default_home(), loaded.config.server.log_level)
                 problems = serving_problems(loaded.config.http)
                 if problems:
                     servicemanager.LogErrorMsg("sage100-mcp can't serve: " + " ".join(problems))
@@ -182,6 +193,9 @@ def run_service(config: Path | None) -> int:  # pragma: no cover - runs only und
                 holder["host"].run()
             except Exception:
                 servicemanager.LogErrorMsg("sage100-mcp stopped on an error:\n" + logs.failure_text())
+            finally:
+                if handler is not None:
+                    stop_file_logging(handler)  # pywin32 reports the service stopped once this returns
 
     servicemanager.Initialize()
     servicemanager.PrepareToHostSingle(Service)

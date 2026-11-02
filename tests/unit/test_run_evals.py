@@ -17,17 +17,19 @@ from tests.paths import REPO
 EVALS = runpy.run_path(str(REPO / "scripts" / "run_evals.py"), run_name="run_evals")
 main: Callable[[list[str]], int] = EVALS["main"]
 normal: Callable[[str, str], str | None] = EVALS["normal"]
+split_command: Callable[..., list[str]] = EVALS["split_command"]
 final_answer: Callable[[str], str | None] = EVALS["final_answer"]
 mcp_config: Callable[..., dict[str, Any]] = EVALS["mcp_config"]
 
 STUB = r"""
-import json, os, sys, yaml
+import json, os, sys, uuid, yaml
 args = sys.argv[1:]
 prompt = args[args.index("-p") + 1]
 config = json.load(open(args[args.index("--mcp-config") + 1]))
-log = os.environ["SAGE100_MCP_STUB_LOG"]
-with open(log, "a") as handle:
-    handle.write(json.dumps({"args": args, "config": config, "env": sorted(os.environ), "cwd": os.getcwd()}) + "\n")
+# One file per call: calls run at once, and on Windows two processes appending to one file can interleave.
+log = os.path.join(os.environ["SAGE100_MCP_STUB_LOG"], uuid.uuid4().hex + ".json")
+with open(log, "w") as handle:
+    json.dump({"args": args, "config": config, "env": sorted(os.environ), "cwd": os.getcwd()}, handle)
 tasks = yaml.safe_load(open(os.environ["SAGE100_MCP_STUB_TASKS"]))["tasks"]
 task = next(t for t in tasks if t["question"] in prompt)
 answer = str(task["golden"]["testbed"])
@@ -55,7 +57,8 @@ say({"type": "result", "subtype": "success", "is_error": False, "result": "Done.
 def stub(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     script = tmp_path / "claude_stub.py"
     script.write_text(STUB, encoding="utf-8")
-    log = tmp_path / "calls.jsonl"
+    log = tmp_path / "calls"
+    log.mkdir()
     monkeypatch.setenv("SAGE100_MCP_STUB_LOG", str(log))
     monkeypatch.setenv("SAGE100_MCP_STUB_TASKS", str(REPO / "evals" / "tasks.yaml"))
     for name, value in {"CLAUDECODE": "1", "CLAUDE_CODE_SESSION_ID": "the-callers", "CCR_SESSION": "x"}.items():
@@ -68,7 +71,7 @@ def stub_command(stub: Path) -> str:
 
 
 def calls(tmp_path: Path) -> list[dict[str, Any]]:
-    return [json.loads(line) for line in (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()]
+    return [json.loads(path.read_text(encoding="utf-8")) for path in sorted((tmp_path / "calls").glob("*.json"))]
 
 
 def test_a_run_over_stdio(stub: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -91,7 +94,9 @@ def test_a_run_over_stdio(stub: Path, tmp_path: Path, capsys: pytest.CaptureFixt
     assert (report["exact"], report["write_blocked"], report["median_tool_calls"]) == (0.75, 1, 1)
     assert list(report["bar"].values()) == [False, True, False]  # exact, median tool calls, WRITE_BLOCKED
     assert "release bar NOT met" in out
-    for call in calls(tmp_path):
+    made = calls(tmp_path)
+    assert len(made) == 4  # one per task, none lost
+    for call in made:
         args = call["args"]
         assert args[args.index("--tools") + 1] == ""
         assert args[args.index("--allowedTools") + 1] == "mcp__sage100"
@@ -157,3 +162,18 @@ def test_a_stdio_server_gets_only_the_variables_it_reads(monkeypatch: pytest.Mon
     env = mcp_config(None, None, ["sage100-mcp", "stdio"])["mcpServers"]["sage100"]["env"]
     assert {name: env[name] for name in wanted} == wanted
     assert not set(unwanted) & set(env)
+
+
+@pytest.mark.parametrize(
+    ("text", "windows", "words"),
+    [
+        ('"C:\\Program Files\\Python312\\python.exe" "C:\\work\\claude stub.py" -p', True,
+         ["C:\\Program Files\\Python312\\python.exe", "C:\\work\\claude stub.py", "-p"]),
+        ("claude --verbose", True, ["claude", "--verbose"]),
+        ("python3 '/tmp/claude stub.py'", False, ["python3", "/tmp/claude stub.py"]),
+        ('npx "@anthropic-ai/claude-code"', False, ["npx", "@anthropic-ai/claude-code"]),
+    ],
+)  # fmt: skip
+def test_the_claude_command_splits_as_its_shell_would(text: str, windows: bool, words: list[str]) -> None:
+    """Windows keeps backslashes, and the quotes around a path are not part of it."""
+    assert split_command(text, windows=windows) == words
